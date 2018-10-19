@@ -57,7 +57,7 @@ setup_cfg = dict(conf.items('metadata'))
 highlight_language = 'python3'
 
 # If your documentation needs a minimal Sphinx version, state it here.
-#needs_sphinx = '1.2'
+# needs_sphinx = '1.2'
 
 # To perform a Sphinx version check that needs to be more specific than
 # major.minor, call `check_sphinx_version("x.y.z")` here.
@@ -105,12 +105,12 @@ release = package.__version__
 
 # Add any paths that contain custom themes here, relative to this directory.
 # To use a different custom theme, add the directory containing the theme.
-#html_theme_path = []
+# html_theme_path = []
 
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes. To override the custom theme, set this to the
 # name of a builtin theme or the name of a custom theme in html_theme_path.
-#html_theme = 'sphinx_rtd_theme'
+# html_theme = 'sphinx_rtd_theme'
 
 # Please update these texts to match the name of your package.
 html_theme_options = {
@@ -121,20 +121,20 @@ html_theme_options = {
 
 
 # Custom sidebar templates, maps document names to template names.
-#html_sidebars = {}
+# html_sidebars = {}
 
 # The name of an image file (relative to this directory) to place at the top
 # of the sidebar.
-#html_logo = ''
+# html_logo = ''
 
 # The name of an image file (within the static path) to use as favicon of the
 # docs.  This file should be a Windows icon file (.ico) being 16x16 or 32x32
 # pixels large.
-#html_favicon = ''
+# html_favicon = ''
 
 # If not '', a 'Last updated on:' timestamp is inserted at every page bottom,
 # using the given strftime format.
-#html_last_updated_fmt = ''
+# html_last_updated_fmt = ''
 
 # The name for this set of Sphinx documents.  If None, it defaults to
 # "<project> v<release> documentation".
@@ -180,4 +180,69 @@ github_issues_url = 'https://github.com/{0}/issues/'.format(
     setup_cfg['github_project'])
 
 # -- compile list of field names
-import compile_fieldnames
+
+import sys
+from io import TextIOWrapper, BytesIO
+from numpy import array
+from sbpy.data import conf
+from astropy.table import Table
+from astropy.io import ascii
+
+out = """
+.. _alternative_fieldnames:
+
+Alternative Field Names
+=======================
+
+The following table lists alternative field names accepted by `sbpy`
+when accessing `~sbpy.data.DataClass` objects, i.e.,
+`~sbpy.data.Ephem`, `~sbpy.data.Orbit`, or `~sbpy.data.Phys` objects.
+
+As an example, heliocentric distance can be addressed a ``'r'`` or
+``'heldist'``:
+
+    >>> from sbpy.data import Ephem
+    >>> ceres = Ephem.from_horizons('Ceres')
+    >>> print(ceres['r']) # doctest: +IGNORE_OUTPUT
+    [2.69866993] AU
+    >>> print(ceres['heldist']) # doctest: +IGNORE_OUTPUT
+    [2.69866993] AU
+
+The list of alternative field names is always up to date, but not
+complete. The source list is located as
+``sbpy.data.conf.fieldnames``. If you think an important alternative
+is missing, please suggest it by opening an issue. However, keep in mind
+that each alternative field name has to be *unique* and *unambiguous*.
+
+
+List of Alternative Field Names
+-------------------------------
+
+"""
+
+# build table
+data = []
+for parameter in conf.fieldnames:
+    data.append(['**'+parameter[-1]+'**',
+                 ', '.join(['``'+str(p)+'``' for p in parameter[:-1]])])
+data = Table(array(data), names=('Description',
+                                 'Alternative Names'))
+
+# redirect stdout
+sys.stdout = TextIOWrapper(BytesIO(), sys.stdout.encoding)
+
+# ascii.write will write to stdout
+datarst = ascii.write(data, format='rst')
+
+# read formatted table data
+sys.stdout.seek(0)
+rsttab = sys.stdout.read()
+
+# add formatted table data to out
+out += rsttab
+
+# write fieldnames.rst
+with open(os.path.join(os.path.dirname(__file__), 'fieldnames.rst'), 'w') as outf:
+    outf.write(out)
+
+sys.stdout.close()
