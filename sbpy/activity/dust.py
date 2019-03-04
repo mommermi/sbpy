@@ -352,9 +352,8 @@ class Afrho(u.SpecificTypeQuantity):
 
         Notes
         -----
-        Filter names can be found in the :mod:`~synphot` `documentation
-        # synphot-predefined-filter>`_.
-        <http: // synphot.readthedocs.io/en/stable/synphot/bandpass.html
+        Filter names can be found in the :mod:`~synphot` 
+        `documentation#synphot-predefined-filter <http://synphot.readthedocs.io/en/stable/synphot/bandpass.html>`__.
 
         """
 
@@ -428,11 +427,11 @@ class Afrho(u.SpecificTypeQuantity):
         Notes
         -----
         Filter names can be found in the :mod:`~synphot` `documentation
-        <http://synphot.readthedocs.io/en/stable/synphot/bandpass.html#synphot-predefined-filter>`_.
+        <http://synphot.readthedocs.io/en/stable/synphot/bandpass.html#synphot-predefined-filter>`__.
 
         A discussion of magnitude zero points can be found in the
         :mod:`~synphot` `documentation
-        <http://synphot.readthedocs.io/en/latest/synphot/units.html#counts-and-magnitudes>`_.
+        <http://synphot.readthedocs.io/en/latest/synphot/units.html#counts-and-magnitudes>`__.
 
         """
 
@@ -473,7 +472,6 @@ class Afrho(u.SpecificTypeQuantity):
 
         Assumes the small angle approximation.
 
-
         Parameters
         ----------
         wave_or_freq : `~astropy.units.Quantity`
@@ -492,7 +490,7 @@ class Afrho(u.SpecificTypeQuantity):
 
         phasecor: bool, optional
             Scale the result by the phase function ``Phi``, assuming
-           ``Afrho`` is quoted for 0° phase.
+            ``Afrho`` is quoted for 0° phase.
 
         Phi : callable, optional
             Phase function, see ``to_phase`` for details.
@@ -628,7 +626,7 @@ class Afrho(u.SpecificTypeQuantity):
         Notes
         -----
         Filter names can be found in the `synphot` `documentation
-        <http://synphot.readthedocs.io/en/stable/synphot/bandpass.html#synphot-predefined-filter>`_.
+        <http://synphot.readthedocs.io/en/stable/synphot/bandpass.html#synphot-predefined-filter>`__.
 
         """
 
@@ -699,11 +697,11 @@ class Afrho(u.SpecificTypeQuantity):
         Notes
         -----
         Filter names can be found in the `synphot` `documentation
-        <http://synphot.readthedocs.io/en/stable/synphot/bandpass.html#synphot-predefined-filter>`_.
+        <http://synphot.readthedocs.io/en/stable/synphot/bandpass.html#synphot-predefined-filter>`__.
 
         A discussion of magnitude zero points can be found in the
         `synphot` `documentation
-        <http://synphot.readthedocs.io/en/latest/synphot/units.html#counts-and-magnitudes>`_.
+        <http://synphot.readthedocs.io/en/latest/synphot/units.html#counts-and-magnitudes>`__.
 
         """
 
@@ -932,7 +930,7 @@ class Efrho(u.SpecificTypeQuantity):
         -----
         Built-in filter names can be found in the :mod:`~synphot`
         `documentation
-        <http://synphot.readthedocs.io/en/stable/synphot/bandpass.html#synphot-predefined-filter>`_.
+        <http://synphot.readthedocs.io/en/stable/synphot/bandpass.html#synphot-predefined-filter>`__.
 
         """
 
@@ -999,7 +997,7 @@ class Efrho(u.SpecificTypeQuantity):
         -----
         A discussion of magnitude zero points can be found in the
         :mod:`~synphot` `documentation
-        <http://synphot.readthedocs.io/en/latest/synphot/units.html#counts-and-magnitudes>`_.
+        <http://synphot.readthedocs.io/en/latest/synphot/units.html#counts-and-magnitudes>`__.
 
         """
 
@@ -1178,7 +1176,7 @@ class Efrho(u.SpecificTypeQuantity):
         Notes
         -----
         Filter names can be found in the `synphot` `documentation
-        <http://synphot.readthedocs.io/en/stable/synphot/bandpass.html#synphot-predefined-filter>`_.
+        <http://synphot.readthedocs.io/en/stable/synphot/bandpass.html#synphot-predefined-filter>`__.
 
         """
 
@@ -1247,11 +1245,11 @@ class Efrho(u.SpecificTypeQuantity):
         See :ref:`sbpy_spectral_standards` for calibration notes.
 
         Filter names can be found in the `synphot` `documentation
-        <http://synphot.readthedocs.io/en/stable/synphot/bandpass.html#synphot-predefined-filter>`_.
+        <http://synphot.readthedocs.io/en/stable/synphot/bandpass.html#synphot-predefined-filter>`__.
 
         A discussion of magnitude zero points can be found in the
         `synphot` `documentation
-        <http://synphot.readthedocs.io/en/latest/synphot/units.html#counts-and-magnitudes>`_.
+        <http://synphot.readthedocs.io/en/latest/synphot/units.html#counts-and-magnitudes>`__.
 
         """
 

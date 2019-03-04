@@ -139,6 +139,7 @@ model does account for the effects of photolysis.
   >>> print(Q)
       <Quantity [1.64403219e+28] 1 / s>
 
+.. _sbpy_spectral_standards:      
 
 Spectral standards and photometric calibration
 ----------------------------------------------
