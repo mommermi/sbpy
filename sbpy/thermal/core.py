@@ -5,12 +5,27 @@ sbpy Thermal Module
 created on June 27, 2017
 """
 
+import numpy as np
+
+import astropy.units as u
+from astropy import constants as const
+
 __all__ = ['ThermalClass', 'STM', 'FRM', 'NEATM']
 
 
 class ThermalClass():
 
-    def flux(phys, eph, lam):
+    def __init__(self, phys, eph):
+        self.phys = phys
+        self.eph = eph
+
+    def subsolartemp(self):
+        return (const.L_sun/(4*np.pi*const.au.to(u.m)**2) *
+                (1.-self.phys['A']) /
+                (self.eph['r'].to('au').value**2*self.phys['eta'] *
+                 const.sigma_sb*self.phys['emissivity']))**0.25
+
+    def flux(lam):
         """Model flux density for a given wavelength `lam`, or a list/array thereof
 
         Parameters
@@ -29,7 +44,8 @@ class ThermalClass():
         >>> from sbpy.thermal import STM
         >>> from sbpy.data import Ephem, Phys
         >>> epoch = Time('2019-03-12 12:30:00', scale='utc')
-        >>> eph = Ephem.from_horizons('2015 HW', location='568', epochs=epoch) # doctest: +REMOTE_DATA
+        # doctest: +REMOTE_DATA
+        >>> eph = Ephem.from_horizons('2015 HW', location='568', epochs=epoch)
         >>> phys = PhysProp('diam'=0.3*u.km, 'pv'=0.3) # doctest: +SKIP
         >>> lam = np.arange(1, 20, 5)*u.micron # doctest: +SKIP
         >>> flux = STM.flux(phys, eph, lam) # doctest: +SKIP

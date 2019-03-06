@@ -1,5 +1,5 @@
 """
-SBPy Module for thermal modeling
+sbpy Module for thermal modeling
 """
 
 from .core import *
