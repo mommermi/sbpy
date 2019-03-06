@@ -43,9 +43,9 @@ PACKAGENAME = metadata.get('package_name', 'sbpy')
 DESCRIPTION = metadata.get(
     'description', 'A Python Module for Small-Body Planetary Astronomy')
 AUTHOR = metadata.get('author', 'sbpy team')
-AUTHOR_EMAIL = metadata.get('author_email', 'michael.mommert@nau.edu')
+AUTHOR_EMAIL = metadata.get('author_email', 'sbpy.dev@gmail.com')
 LICENSE = metadata.get('license', 'BSD 3-Clause')
-URL = metadata.get('url', 'http://www.github.com/mommermi/sbpy')
+URL = metadata.get('url', 'http://www.github.com/NASA-Planetary-Science/sbpy')
 
 # order of priority for long_description:
 #   (1) set in setup.cfg,
@@ -105,7 +105,7 @@ package_info = get_package_info()
 
 # Add the project-global data
 package_info['package_data'].setdefault(PACKAGENAME, [])
-package_info['package_data'][PACKAGENAME].append('data/*')
+package_info['package_data'][PACKAGENAME].append('data_archive/*')
 
 # Define entry points for command-line scripts
 entry_points = {'console_scripts': []}

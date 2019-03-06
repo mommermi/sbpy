@@ -9,6 +9,7 @@ import numpy as np
 
 import astropy.units as u
 from astropy import constants as const
+from ._thermal import integrate_planck
 
 __all__ = ['ThermalClass', 'STM', 'FRM', 'NEATM']
 
@@ -16,6 +17,8 @@ __all__ = ['ThermalClass', 'STM', 'FRM', 'NEATM']
 class ThermalClass():
 
     def __init__(self, phys, eph):
+        """phys should only refer to a single object, while eph can have
+        multiple epochs"""
         self.phys = phys
         self.eph = eph
 
@@ -25,7 +28,7 @@ class ThermalClass():
                 (self.eph['r'].to('au').value**2*self.phys['eta'] *
                  const.sigma_sb*self.phys['emissivity']))**0.25
 
-    def flux(lam):
+    def _flux(lam):
         """Model flux density for a given wavelength `lam`, or a list/array thereof
 
         Parameters
@@ -49,9 +52,6 @@ class ThermalClass():
         >>> phys = PhysProp('diam'=0.3*u.km, 'pv'=0.3) # doctest: +SKIP
         >>> lam = np.arange(1, 20, 5)*u.micron # doctest: +SKIP
         >>> flux = STM.flux(phys, eph, lam) # doctest: +SKIP
-
-        not yet implemented
-
         """
 
     def fit(self, eph):
@@ -73,7 +73,20 @@ class ThermalClass():
 
 
 class STM(ThermalClass):
-    pass
+
+    def flux(self, lam):
+
+        # check that wavelengths is list, not float, not int, not list of Quantities
+        return (self.phys['emissivity'] * self.phys['diam']**2 /
+                self.eph['delta']**2 *
+                np.pi * const.h * const.c**2 / lam**5 *
+                integrate_planck(1, 0, np.pi/2, np.array(lam),
+                                 self.subsolartemp().to('K').value,
+                                 self.eph['alpha'].to('deg').value)).to(
+            #            u.W/(u.micron*u.m**2),
+            #            equivalencies=u.spectral_density(lam))
+                                     u.astrophys.Jy,
+                                     equivalencies=u.spectral_density(lam))
 
 
 class FRM(ThermalClass):
