@@ -295,6 +295,76 @@ Note the specific syntax in this case (``obs['ra'][:] = ...``) that
 is required by `~astropy.table.Table` if you want to replace
 an entire column.
 
+
+
+`~sbpy.data.DataClass` provides a convenience function to expand a
+`~sbpy.data.DataClass` object and integrate a nested column. Imagine
+you took observations of some target on two different epochs with
+different heliocentric and observer-centric distances of the target:
+
+    >>> obs = Ephem.from_dict({'jd': [2451200, 2451300]*u.d.
+    ...                        'heliodist': [1.1, 1.2]*u.au,
+    ...                        'obsdist': [0.5, 0.6]*u.au})
+
+For each epoch, you measured the magnitude of the target in different
+bands (e.g., [V=12.3, V=12.5, R=12.3, B=12.8] for the first epoch and
+[V=13.5, R=12.8, V=13.4] for the second epoch). In order to add this
+information to the existing ``obs`` object,
+`~sbpy.data.DataClass.expand` can be
+used. `~sbpy.data.DataClass.expand` expands the underlying data table
+of the ``obs`` object to accommodate the observations so that the
+observational data match the correct rows in the ``obs`` data
+table. We will add a ``mag`` column and a ``filter`` column, which
+have to be added separately:
+
+    >>> obs.expand([['V', 'V', 'R', 'B'], ['V', 'R', 'V']], 'filter')
+    >>> print(obs)
+    <QTable length=7>
+	jd    heliodist obsdist filter
+	d         AU       AU         
+     float64   float64  float64 str32 
+    --------- --------- ------- ------
+    2451200.0       1.1     0.5      V
+    2451200.0       1.1     0.5      V
+    2451200.0       1.1     0.5      R
+    2451200.0       1.1     0.5      B
+    2451300.0       1.2     0.6      V
+    2451300.0       1.2     0.6      R
+    2451300.0       1.2     0.6      V
+
+`~sbpy.data.DataClass.expand` accepts a data sequence, a column name,
+and a column unit (in this case `None`) as parameters. If multiple
+observations have to be assigned to each epoch in ``obs``, the data
+sequence has to be nested: each element in the data sequence
+corresponds to an individual epoch. In this case, the first element is
+a list of 4 elements, meaning that 4 observations will be assigned to
+the first epoch. Note how ``obs`` has been expanded to a total length
+of seven elements in comparison to the orignal two epochs that were
+defined originally. The nested elements indicate that rows from the
+original ``obs`` object have to be duplicated.
+
+In order to add the magnitudes, we can use the same approach, but in
+this case the provided data have to be flat (not a nested sequence;
+`~numpy.ravel` can be used to flatten nested sequences) in order to
+prevent further expansion:
+
+    >>> obs.expand([12.3, 12.5, 12.3, 12.8, 13.5, 12.8, 13.4]*u.mag,
+    ...            'mag')
+    >>> print(obs)
+    <QTable length=7>
+	jd    heliodist obsdist filter   mag  
+	d         AU       AU            mag  
+     float64   float64  float64 str32  float64
+    --------- --------- ------- ------ -------
+    2451200.0       1.1     0.5      V    12.3
+    2451200.0       1.1     0.5      V    12.5
+    2451200.0       1.1     0.5      R    12.3
+    2451200.0       1.1     0.5      B    12.8
+    2451300.0       1.2     0.6      V    13.5
+    2451300.0       1.2     0.6      R    12.8
+    2451300.0       1.2     0.6      V    13.4
+
+
 More complex data table modifications are possible by directly
 accessing the underlying `~astropy.table.QTable` object.
 

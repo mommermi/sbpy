@@ -9,7 +9,7 @@ created on June 22, 2017
 
 from copy import deepcopy
 from collections import OrderedDict
-from numpy import ndarray, array
+from numpy import ndarray, array, hstack, ravel
 from astropy.table import QTable, Column, vstack
 import astropy.units as u
 
@@ -333,7 +333,7 @@ class DataClass():
             self = self._convert_columns(ident)
             ident = self._translate_columns(ident)[0]
 
-        # return as element from self_table
+        # return an element from self_table
         return self._table[ident]
 
     def _translate_columns(self, target_colnames):
@@ -531,6 +531,111 @@ class DataClass():
 
         self._table.add_column(Column(data, name=name), **kwargs)
         return len(self.column_names)
+
+    def expand(self, data, name, unit=None):
+        """Expand and reshape `~DataClass` object to include one additional
+        column.
+
+        Parameters
+        ----------
+        data : list or `astropy.units.Quantity` object with iterable
+            Data to be added in a new column in form of a one-dimensional
+            sequence or a two-dimensional nested sequence. Each element in
+            `data`
+            corresponds to a row in the existing data table. If an element
+            of `data` is a list, the corresponding data table row is
+            duplicated by the number of elements in this list. If `data` is
+            provided as a flat list and has the same length as the current
+            data table, `data` will be simply added as a column to the data
+            table and the length of the data table will not change. If
+            `data` is provided as a `~astropy.units.Quantity` object, its
+            unit is adopted, unless `unit` is specified (not `None`).
+        name : str
+            Name of the new data column.
+        unit : `~astropy.units` object or str, optional
+            Unit to be applied to the new column. Default:
+            `None`
+
+        Returns
+        -------
+        None
+
+        Note
+        ----
+        As a result of this method, the length of the underlying data table
+        will be the same as the length of the flattened `data` parameter.
+
+        Examples
+        --------
+        >>> from sbpy.data import DataClass
+        >>> import astropy.units as u
+        >>> dat = DataClass.from_array([[1, 2, 3]*u.Unit('m'),
+        ...                             [4, 5, 6]*u.m/u.s,
+        ...                             ['a', 'b', 'c']],
+        ...                            names=('a', 'b', 'c'))
+        >>> dat.expand([[1], [2, 3], [4, 5, 6]], name='d', unit='kg')
+        >>> print(dat)
+        <QTable length=6>
+           a       b     c      d
+           m     m / s          kg
+        float64 float64 str1 float64
+        ------- ------- ---- -------
+            1.0     4.0    a     1.0
+            2.0     5.0    b     2.0
+            2.0     5.0    b     3.0
+            3.0     6.0    c     4.0
+            3.0     6.0    c     5.0
+            3.0     6.0    c     6.0
+
+        `dat` was expanded and those rows with multiple values
+        in the new column `d` were duplicated to match the order in `d`.
+
+        >>> dat.expand([10, 20, 30, 40, 50, 60], name='e')
+        >>> print(dat)
+        <QTable length=6>
+           a       b     c      d       e
+           m     m / s          kg
+        float64 float64 str1 float64 float64
+        ------- ------- ---- ------- -------
+            1.0     4.0    a     1.0    10.0
+            2.0     5.0    b     2.0    20.0
+            2.0     5.0    b     3.0    30.0
+            3.0     6.0    c     4.0    40.0
+            3.0     6.0    c     5.0    50.0
+            3.0     6.0    c     6.0    60.0
+
+        In this case, the new column data provided to `expand` is flat and
+        has the same length as the underlying data table. Hence, the new
+        column data is simply added a new column.
+        """
+        _newtable = None
+
+        # strip units off Quantity objects
+        if isinstance(data, u.Quantity):
+            unit = data.unit
+            data = data.value
+
+        if len(data) != len(self.table):
+            raise RuntimeError(('DataClass.expand data parameter must have '
+                                'same length as self.table'))
+
+        _newcolumn = array([])
+        for i, val in enumerate(data):
+            if not isinstance(val, (list, tuple, ndarray)):
+                val = [val]
+            _newcolumn = hstack([_newcolumn, val])
+            # add corresponding row from _table for each element in val
+            for j in range(len(val)):
+                # initialize new QTable object
+                if _newtable is None:
+                    _newtable = QTable(self.table[0])
+                    continue
+                _newtable.add_row(self.table[i])
+
+        # add new column
+        _newtable.add_column(Column(_newcolumn, name=name, unit=unit))
+
+        self._table = _newtable
 
 
 def mpc_observations(targetid):

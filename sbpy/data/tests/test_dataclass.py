@@ -282,3 +282,35 @@ def test_field_conversion():
                                                ('b', 4*u.m/u.s),
                                                ('c', 'a'))))
         tab['radius']
+
+
+def test_expand():
+    """tests for sbpy.data.DataClass.expand"""
+
+    tab = DataClass.from_dict(OrderedDict((('a', [1, 2, 3]*u.m),
+                                           ('b', [4, 5, 6]*u.m/u.s),
+                                           ('c', [7, 8, 9]*u.kg))))
+
+    # apply nested sequence
+    tab.expand([[1], [2, 3], [4, 5, 6]], 'test', unit='Hz')
+
+    assert all(tab['test'] == [1., 2., 3., 4., 5., 6.]*u.Hz)
+
+    # apply flat sequence, no unit
+    tab.expand(['a', 'b', 'c', 'd', 'e', 'f'], 'test2')
+
+    assert all(tab['test2'] == ['a', 'b', 'c', 'd', 'e', 'f'])
+
+    assert tab['a'][0] == 1.*u.m
+    assert tab['b'][1] == 5.*u.m/u.s
+    assert tab['c'][2] == 8*u.kg
+    assert tab['test'][3] == 4.*u.Hz
+    assert tab['test2'][4] == 'e'
+
+    # wrong number of elements (not matching len(self.table))
+    with pytest.raises(RuntimeError):
+        tab.expand([[1], [2, 3], [4, 5, 6]], 'test2', unit='Hz')
+
+    # add data from Quantity; check unit
+    tab.expand([1, 2, 3, 4, 5, 6]*u.s, 'test3')
+    assert tab['test3'][0].unit == u.s
