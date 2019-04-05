@@ -5,7 +5,7 @@
 static char module_docstring[] =
     "sbpy sub-module to calculate thermal model surface temperature distributions.";
 static char integrate_planck_docstring[] =
-  "Romberg Integrator for thermal model Planck function integration in one dimension\n\nThis function is not intended for use by the sbpy user; based on 'Numerical Recipes in C', Press et al. 1988, Cambridge University Press.\n\nParameters\n----------\nmodel : int\n    model integrand identifier (1: STM, 2: FRM, 3: NEATM)\na : float\n    lower boundary for integration (radians)\nb : float\n    upper boundary for integration (radians)\nwavelengths : iterable of n floats\n    n wavelengths at which to evaluate integral (micron)\nsubsolartemp : iterable of m floats\n    m subsolar temperatures, one for each ephemeris (K)\nphaseangle : iterable of m floats\n    m solar phase angles (radians, only relevant for NEATM), one for each ephemeris\n\nReturns\n-------\results_array : mxn numpy array of calculated flux densities\n";
+  "Romberg Integrator for thermal model Planck function integration in one dimension\n\nThis function is not intended for use by the sbpy user; based on 'Numerical Recipes in C', Press et al. 1988, Cambridge University Press.\n\nParameters\n----------\nmodel : int\n    model integrand identifier (1: STM, 2: FRM, 3: NEATM)\na : float\n    lower boundary for integration (radians)\nb : float\n    upper boundary for integration (radians)\nwavelengths : iterable of n floats\n    n wavelengths at which to evaluate integral, one per epoch (micron)\nsubsolartemp : iterable of n floats\n    n subsolar temperatures (K), one per epoch\nphaseangle : iterable of n floats\n    n solar phase angles (radians, only relevant for NEATM), one for epoch\n\nReturns\n-------\results_array : numpy array of calculated flux densities with length n\n";
 
 static PyObject *thermal_integrate_planck(PyObject *self, PyObject *args);
 
@@ -78,24 +78,31 @@ static PyObject *thermal_integrate_planck(PyObject *self, PyObject *args)
   /* extract number of ephemerides provided */
   int n_eph = (int)PyArray_DIM(phaseangle_array, 0);
 
+  if (n_wavelengths != n_eph)
+    {
+      PyErr_SetString(PyExc_RuntimeError,
+		      "require one wavelength per epoch.");
+      return NULL;
+    }
+      
   /* extract Python arrays into C arrays */
   double *wavelengths = (double*)PyArray_DATA(wavelengths_array);
   double *subsolartemps = (double*)PyArray_DATA(subsolartemp_array);
   double *phaseangles = (double*)PyArray_DATA(phaseangle_array);  
     
   /* Call the integrator for each wavelength and append results to a list*/
-  int i, j;
-  double results[n_wavelengths][n_eph];
-  for (i=0; i<n_wavelengths; i++) {
-    for (j=0; j<n_eph; j++) {
+  int i;
+  double results[n_wavelengths];
+  for (i=0; i<n_wavelengths; i++)
+    {
       double value = integrate_planck(model, a, b, wavelengths[i],
-				      subsolartemps[j], phaseangles[j]);
-    
+				      subsolartemps[i], phaseangles[i]);
+      
       /* Resolve error codes */
       switch ((int)value) {
       case -9999: 
 	PyErr_SetString(PyExc_RuntimeError,
-	       "Temperature distribution integration did not converge.");
+		  "Temperature distribution integration did not converge.");
 	return NULL;
 	break;
       case -9998:
@@ -106,15 +113,14 @@ static PyObject *thermal_integrate_planck(PyObject *self, PyObject *args)
       }
 
       /* assign value to results array */
-      results[i][j] = value;
+      results[i] = value;
     }
-  }
 
   /* prepare output array */
-  npy_intp dims[] = {n_wavelengths, n_eph};
-  PyObject *results_array = PyArray_SimpleNew(n_eph, dims, NPY_DOUBLE);
+  npy_intp dims[] = {n_eph};
+  PyObject *results_array = PyArray_SimpleNew(1, dims, NPY_DOUBLE);
   memcpy(PyArray_DATA(results_array), results, sizeof(results));
-  
+
   /* Clean up. */
   Py_DECREF(wavelengths_array);
   Py_DECREF(subsolartemp_array);
