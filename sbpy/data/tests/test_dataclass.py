@@ -34,9 +34,6 @@ def test_get_set():
     shortened = data[[0, 1]]
     assert len(shortened) == 2
 
-    # get a single column as an attribute
-    assert len(data.a == 3)
-
     # modify an existing column
     data['a'][:] = [0, 0, 0]
     assert data['a'][0] == 0

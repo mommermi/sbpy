@@ -168,14 +168,6 @@ combine both examples and do:
     >>> print(obs[1]['ra']) # doctest: +SKIP
     10.233453 deg
 
-Another - maybe more elegant - way to access data table columns is as
-an attribute:
-
-    >>> print(obs.ra) # doctest: +SKIP
-    [10.223423 10.233453 10.243452] deg
-    >>> print(obs.ra[1])
-    10.233453 deg
-
 Just like in any `~astropy.table.Table` or `~astropy.table.QTable` object, you can use slicing to obtain subset tables from your data, for instance:
 
     >>> print(obs['ra', 'dec']) # doctest: +SKIP

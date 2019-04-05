@@ -290,20 +290,6 @@ class DataClass():
         """Get number of data elements in _table"""
         return len(self._table)
 
-    def __getattr__(self, field):
-        """Get attribute from ``self._table` (columns, rows); checks
-        for and may use alternative field names."""
-
-        if field in dir(self):
-            return self.field
-        else:
-            try:
-                field = self._translate_columns(field)[0]
-                return self._table[field]
-            except (KeyError, IndexError, AttributeError):
-                raise AttributeError('Attribute {:s} not available.'.format(
-                    field))
-
     def __repr__(self):
         """Return representation of the underlying data table
         (``self._table.__repr__()``)"""
