@@ -229,17 +229,18 @@ class STM(ThermalClass, Fittable1DModel):
             self.phys.add_column([1.0]*max([len(self.phys), 1]),
                                  'eta')
 
-    def from_data(self):
+    def from_data(self, init_diam=1*u.km, init_subsolartemp=200*u.K):
 
         # initialize parameters if not yet done
         try:
             self.phys['diam']
         except KeyError:
-            self.phys.table['diam'] = [1]*u.km
+            self.phys.table['diam'] = self._apply_unit(init_diam, u.km)
         try:
             self.ephem['subsolartemp']
         except KeyError:
-            self.calculate_subsolartemp()
+            self.ephem._table['subsolartemp'] = self._apply_unit(
+                init_subsolartemp, u.K)
 
         # initialize Fittable1DModel
         diam = self._apply_unit(self.phys['diam'][0], u.km)
@@ -260,6 +261,8 @@ class STM(ThermalClass, Fittable1DModel):
         self.ephem._table['subsolartemp'] = (
             fit.subsolartemp_au /
             np.sqrt(self.ephem['heliodist'].to('au').data))
+
+        self.ephem._table['thermal_flux_fit'] = self.evaluate(lam)
 
     def evaluate(self, x, *args, jy=True):
         """Use this method only internally!!!!!
