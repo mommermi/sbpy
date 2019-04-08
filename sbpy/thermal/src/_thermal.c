@@ -1,11 +1,14 @@
 #include <Python.h>
 #include <numpy/arrayobject.h>
 #include "thermal.h"
+#include "math.h"
+
+#define PI   M_PI
 
 static char module_docstring[] =
     "sbpy sub-module to calculate thermal model surface temperature distributions.";
 static char integrate_planck_docstring[] =
-  "Romberg Integrator for thermal model Planck function integration in one dimension\n\nThis function is not intended for use by the sbpy user; based on 'Numerical Recipes in C', Press et al. 1988, Cambridge University Press.\n\nParameters\n----------\nmodel : int\n    model integrand identifier (1: STM, 2: FRM, 3: NEATM)\na : float\n    lower boundary for integration (radians)\nb : float\n    upper boundary for integration (radians)\nwavelengths : iterable of n floats\n    n wavelengths at which to evaluate integral, one per epoch (micron)\nsubsolartemp : iterable of n floats\n    n subsolar temperatures (K), one per epoch\nphaseangle : iterable of n floats\n    n solar phase angles (radians, only relevant for NEATM), one for epoch\n\nReturns\n-------\results_array : numpy array of calculated flux densities with length n\n";
+  "Romberg Integrator for thermal model Planck function integration in one dimension\n\nThis function is not intended for use by the sbpy user; based on 'Numerical Recipes in C', Press et al. 1988, Cambridge University Press.\n\nParameters\n----------\nmodel : int\n    model integrand identifier (1: STM, 2: FRM, 3: NEATM)\na : float\n    lower boundary for integration (radians)\nb : float\n    upper boundary for integration (radians)\nwavelengths : iterable of n floats\n    n wavelengths at which to evaluate integral, one per epoch (micron)\nsubsolartemp : iterable of n floats\n    n subsolar temperatures (K), one per epoch\nphaseangle : iterable of n floats\n    n solar phase angles (degrees, only relevant for NEATM), one for epoch\n\nReturns\n-------\results_array : numpy array of calculated flux densities with length n\n";
 
 static PyObject *thermal_integrate_planck(PyObject *self, PyObject *args);
 
@@ -96,7 +99,8 @@ static PyObject *thermal_integrate_planck(PyObject *self, PyObject *args)
   for (i=0; i<n_wavelengths; i++)
     {
       double value = integrate_planck(model, a, b, wavelengths[i],
-				      subsolartemps[i], phaseangles[i]);
+				      subsolartemps[i],
+				      phaseangles[i]/PI*180);
       
       /* Resolve error codes */
       switch ((int)value) {
