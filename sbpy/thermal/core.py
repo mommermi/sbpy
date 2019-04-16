@@ -64,8 +64,8 @@ class ThermalClass():
 
         Notes
         -----
-        * If no emissivity is provided as part of ``phys``, an emissivity
-          of 0.9 is assumed.
+           * If no emissivity is provided as part of ``phys``, an emissivity
+             of 0.9 is assumed.
 
         """
 
@@ -125,7 +125,7 @@ class ThermalClass():
            * ``emissivity``: target emissivity
 
         This method requires the following fields in ``self.ephem``:
-        * ``heliodist``: heliocentric distance of the target
+           * ``heliodist``: heliocentric distance of the target
 
         Resulting subsolar temperatures are added as a column called
         ``subsolartemp`` to ``self.ephem`` (not to ``self.phys`` as
@@ -149,24 +149,47 @@ class ThermalClass():
 
         return self.ephem
 
+    def calculate_albedo(self):
+
+        try:
+            self.phys['absmag']
+        except KeyError:
+            raise RuntimeError(("Albedo calculation requires 'absmag' in "
+                                "self.phys"))
+
+        try:
+            self.phys['diam']
+        except KeyError:
+            raise RuntimeError(("Albedo calculation requires 'diam' in "
+                                "self.phys"))
+
+        self.phys._table['pv'] = (
+            (1329/self.phys['diam'].to('km').value *
+             10**(-self.phys['absmag'].to('mag').value/5))**2)
+
+        self.phys._table['bondalbedo'] = (
+            (0.29+0.684*0.15)*self.phys._table['pv'])
+
+        return self.phys
+
     def calculate_flux(self, lam, jy=True):
         """Wrapper method to calculate flux density estimates.
 
         Parameters
         ----------
         lam : `~astropy.units.Quantity` or sequence of floats
-            The wavelengths at which to evaluate the thermal model and
-            estimate the thermal flux densities. The length of ``lam`` has
-            to be the same as the length of ``self.ephem``. If a
-            `~astropy.units.Quantity` object is provided, each element of
-            ``lam`` is applied to the corresponding element of
-            ``self.ephem``. If a sequence is provided (a nested list),
-            the sequence is used to expand ``self.ephem`` (see
-            `~sbpy.data.DataClass.expand` for a discussion).
-        jy : bool, optional
-            Flux density units to be used: if ``True``,
-            Janskys are used; if ``False``, units of
-            :math:`W m^{-1} {\mu}m^{-1}` are used. Default: ``True``
+           The wavelengths at which to evaluate the thermal model and
+           estimate the thermal flux densities. The length of ``lam`` has
+           to be the same as the length of ``self.ephem``. If a
+           `~astropy.units.Quantity` object is provided, each element of
+           ``lam`` is applied to the corresponding element of
+           ``self.ephem``. If a sequence is provided (a nested list),
+           the sequence is used to expand ``self.ephem`` (see
+           `~sbpy.data.DataClass.expand` for a discussion).
+           jy : bool, optional
+           Flux density units to be used: if ``True``,
+           Janskys are used; if ``False``, units of
+           :math:`W m^{-1} {\mu}m^{-1}` are used. Default: ``True``
 
         Notes
         -----
@@ -190,7 +213,7 @@ class ThermalClass():
         -------
         `~sbpy.data.Ephem` object that is a copy of ``self.ephem``,
         containing ``thermal_lam`` and ``therml_flux``.
-"""
+        """
 
         # calculate subsolar temperature if not provided
         try:
@@ -206,9 +229,8 @@ class ThermalClass():
             lam = [lam]*len(self.ephem)
 
         # reshape self.ephem and lam for self.evaluate
-
         self.ephem.expand(lam, 'thermal_lam')
-        lam = self.ephem['thermal_lam'].data
+        lam = self.ephem['thermal_lam']
 
         # call abstract `evaluate` method
         flux = self.evaluate(lam, jy=jy)
@@ -223,23 +245,23 @@ class ThermalClass():
 
     def _flux(self, model, wavelengths, jy=True):
         """Internal low-level method to evaluate model at given
-        wavelengths and return spectral flux densities. Users are advised to
-        use the high-level
-        function `~sbpy.thermal.ThermalClass.calculate_flux` instead.
+         wavelengths and return spectral flux densities. Users are advised to
+         use the high-level
+         function `~sbpy.thermal.ThermalClass.calculate_flux` instead.
 
-        Parameters
-        ----------
-        model : integer
+         Parameters
+         ----------
+         model : integer
             Model identifier code for C code (1: STM, 2: FRM, 3: NEATM)
-        wavelengths : `~astropy.units.Quantity` object or list
+            wavelengths : `~astropy.units.Quantity` object or list
             Wavelengths at which to evaluate model. If a list of floats is
             provided, wavelengths must be in units of micron. Must have the
             same length as ``self.ephem``.
-        jy : bool, optional
+         jy : bool, optional
             Flux density units to be used: if ``True``,
             Janskys are used; if ``False``, units of
             :math:`W m^{-1} {\mu}m^{-1}` are used. Default: ``True``
-        """
+         """
 
         if jy:
             flux_unit = u.astrophys.Jy
@@ -266,23 +288,34 @@ class ThermalClass():
 
     @staticmethod
     def _apply_unit(value, unit, equiv=None):
-        """utility function to enforce Quantity nature for object"""
+        """Utility function to enforce Quantity nature for object"""
         if isinstance(value, u.Quantity):
             return value.to(unit, equivalencies=equiv)
         else:
             return u.Quantity(value, unit)
 
+    @classmethod
+    def from_data(cls, phys, ephem, *pargs, **kwargs):
+        """Create a `~sbpy.thermal.ThermalClass` object by fitting
+        the corresponding thermal model to observations provided
+        through ``ephem``."""
+
+        self = cls(phys, ephem)
+        self.fit(*pargs, **kwargs)
+
+        return self
+
 
 class STM(ThermalClass, Fittable1DModel):
-    """Implementation of the Standard Thermal Model (STM) as defined by
-    `Morrison and Lebofsky (1979)
+    """Implementation of the Standard Thermal Model(STM) as defined by
+    `Morrison and Lebofsky(1979)
     <https://ui.adsabs.harvard.edu/abs/1979aste.book..184M/abstract>`_
     and `Lebofsky et al. (1986)
     <https://ui.adsabs.harvard.edu/abs/1986Icar...68..239L/abstract>`_.
 
     This class derives from both `~sbpy.thermal.ThermalClass` and
     `~astropy.modeling.Fittable1DModel`. Fitting parameters are the target
-    diameter (``self.phys['diam']``) and the target subsolar temperature
+    diameter(``self.phys['diam']``) and the target subsolar temperature
     (``self.ephem['subsolartemp']``).
     """
 
@@ -311,7 +344,7 @@ class STM(ThermalClass, Fittable1DModel):
     def __init__(self, *pargs):
         """If a `~sbpy.data.Phys` object is provided for initiation but
         does not contain a beaming parameter ``eta``,
-        :math:`\eta=1` is assumed."""
+        : math: `\eta = 1` is assumed."""
 
         ThermalClass.__init__(self, *pargs)
 
@@ -323,24 +356,25 @@ class STM(ThermalClass, Fittable1DModel):
                                  'eta')
 
         # register STM references
-        bib.register('sbpy.thermal.STM', {'method': ['1979aste.book..184M',
-                                                     '1986Icar...68..239L']})
+        bib.register('sbpy.thermal.STM',
+                     {'method': ['1979aste.book..184M',
+                                 '1986Icar...68..239L']})
 
     def fit(self, init_diam=1*u.km, init_subsolartemp=150*u.K,
-            fitter=fitting.LevMarLSQFitter()):
+            fitter=fitting.SLSQPLSQFitter()):
         """Fit this `~sbpy.thermal.STM` object to observational data
         via the target diameter and its subsolar temperature.
 
         Parameters
         ----------
-        init_diam : `~astropy.units.Quantity`, optional
-            Initial guess for the target's diameter. Default: ``1*u.km``
-        init_subsolartemp : `~astropy.units.Quantity`, optional
-            Initial guess for the target's mean subsolar temperature across
-            all epochs in ``self.ephem``. Default: ``150*u.K``
-        fitter : `~astropy.modeling.fitting` method, optional
-            Fitting method to be utilized. Default:
-            `~astropy.modeling.fitting.LevMarLSQFitter()`
+        init_diam: `~astropy.units.Quantity`, optional
+           Initial guess for the target's diameter. Default: ``1*u.km``
+        init_subsolartemp: `~astropy.units.Quantity`, optional
+           Initial guess for the target's mean subsolar temperature across
+           all epochs in ``self.ephem``. Default: ``150*u.K``
+        fitter: `~astropy.modeling.fitting` method, optional
+           Fitting method to be utilized. Default:
+           `~astropy.modeling.fitting.SLSQPLSQFitter()`
 
         Notes
         -----
@@ -395,12 +429,12 @@ class STM(ThermalClass, Fittable1DModel):
         Parameters
         ----------
         x: `astropy.units` quantity, `~numpy.ndarray`, or list
-            Wavelengths at which to evaluate model. If a list of floats is
-            provided, wavelengths must be in units of micron.
-        jy : bool, optional
-            Flux density units to be used: if ``True``,
-            Janskys are used; if ``False``, units of
-            :math:`W m^{-1} {\mu}m^{-1}` are used. Default: ``True``
+           Wavelengths at which to evaluate model. If a list of floats is
+           provided, wavelengths must be in units of micron.
+        jy: bool, optional
+           Flux density units to be used: if ``True``,
+           Janskys are used; if ``False``, units of
+           :math: `W m ^ {-1} {\mu}m ^ {-1}` are used. Default: ``True``
 
         Notes
         -----
@@ -450,13 +484,13 @@ class STM(ThermalClass, Fittable1DModel):
 
 
 class FRM(ThermalClass, Fittable1DModel):
-    """Implementation of the Fast Rotating Model (FRM) as defined by
-    `Lebofsky and Spencer (1989)
+    """Implementation of the Fast Rotating Model(FRM) as defined by
+    `Lebofsky and Spencer(1989)
     <https://ui.adsabs.harvard.edu/abs/1989aste.conf..128L/abstract>`_.
 
     This class derives from both `~sbpy.thermal.ThermalClass` and
     `~astropy.modeling.Fittable1DModel`. Fitting parameters are the target
-    diameter (``self.phys['diam']``) and the target subsolar temperature
+    diameter(``self.phys['diam']``) and the target subsolar temperature
     (``self.ephem['subsolartemp']``).
     """
 
@@ -484,8 +518,8 @@ class FRM(ThermalClass, Fittable1DModel):
 
     def __init__(self, *pargs):
         """If a `~sbpy.data.Phys` object is provided for initiation but
-        does not contain a beaming parameter ``eta``,
-        :math:`\eta=\pi` is assumed."""
+         does not contain a beaming parameter ``eta``,
+         :math:`\eta =\pi` is assumed."""
 
         ThermalClass.__init__(self, *pargs)
 
@@ -500,20 +534,20 @@ class FRM(ThermalClass, Fittable1DModel):
         bib.register('sbpy.thermal.FRM', {'method': '1989aste.conf..128L'})
 
     def fit(self, init_diam=1*u.km, init_subsolartemp=150*u.K,
-            fitter=fitting.LevMarLSQFitter()):
+            fitter=fitting.SLSQPLSQFitter()):
         """Fit this `~sbpy.thermal.FRM` object to observational data
         via the target diameter and its subsolar temperature.
 
         Parameters
         ----------
-        init_diam : `~astropy.units.Quantity`, optional
-            Initial guess for the target's diameter. Default: ``1*u.km``
-        init_subsolartemp : `~astropy.units.Quantity`, optional
-            Initial guess for the target's mean subsolar temperature across
-            all epochs in ``self.ephem``. Default: ``150*u.K``
-        fitter : `~astropy.modeling.fitting` method, optional
-            Fitting method to be utilized. Default:
-            `~astropy.modeling.fitting.LevMarLSQFitter()`
+        init_diam: `~astropy.units.Quantity`, optional
+           Initial guess for the target's diameter. Default: ``1*u.km``
+        init_subsolartemp: `~astropy.units.Quantity`, optional
+           Initial guess for the target's mean subsolar temperature across
+           all epochs in ``self.ephem``. Default: ``150*u.K``
+        fitter: `~astropy.modeling.fitting` method, optional
+           Fitting method to be utilized. Default:
+           `~astropy.modeling.fitting.SLSQPLSQFitter()`
 
         Notes
         -----
@@ -568,12 +602,12 @@ class FRM(ThermalClass, Fittable1DModel):
         Parameters
         ----------
         x: `astropy.units` quantity, `~numpy.ndarray`, or list
-            Wavelengths at which to evaluate model. If a list of floats is
-            provided, wavelengths must be in units of micron.
-        jy : bool, optional
-            Flux density units to be used: if ``True``,
-            Janskys are used; if ``False``, units of
-            :math:`W m^{-1} {\mu}m^{-1}` are used. Default: ``True``
+           Wavelengths at which to evaluate model. If a list of floats is
+           provided, wavelengths must be in units of micron.
+        jy: bool, optional
+           Flux density units to be used: if ``True``,
+           Janskys are used; if ``False``, units of
+           :math: `W m ^ {-1} {\mu}m ^ {-1}` are used. Default: ``True``
 
         Notes
         -----
@@ -599,12 +633,10 @@ class FRM(ThermalClass, Fittable1DModel):
             diam = self._apply_unit(args[0][0], u.km)
             subsolartemp_au = self._apply_unit(args[1][0], u.K,
                                                equiv=u.temperature())
-
             self.phys._table['diam'] = diam
             self.ephem._table['subsolartemp'] = (
                 subsolartemp_au /
                 np.sqrt(self.ephem['heliodist'].to('au').data))
-
         # or pull the parameters from self.phys
         else:
             diam = self._apply_unit(self.phys['diam'], u.km)
@@ -623,14 +655,14 @@ class FRM(ThermalClass, Fittable1DModel):
 
 
 class NEATM(ThermalClass, Fittable1DModel):
-    """Implementation of the Near-Earth Asteroid Thermal Model (NEATM) as
-    defined by`Harris (1998)
+    """Implementation of the Near-Earth Asteroid Thermal Model(NEATM) as
+    defined by`Harris(1998)
     <https://ui.adsabs.harvard.edu/link_gateway/1998Icar..131..291H/doi:10.1006/icar.1997.5865>`_. This
     is the floating-:math:`\eta` version of this model.
 
     This class derives from both `~sbpy.thermal.ThermalClass` and
     `~astropy.modeling.Fittable1DModel`. Fitting parameters are the target
-    diameter (``self.phys['diam']``), the target Bond albedo
+    diameter(``self.phys['diam']``), the target Bond albedo
     (``self.phys['bondalbedo']``), and the target infrared beaming parameter
     (``self.phys['eta']``).
 
@@ -672,22 +704,23 @@ class NEATM(ThermalClass, Fittable1DModel):
 
     def fit(self, init_diam=1*u.km, init_eta=1.0,
             init_bondalbedo=0.05,
-            fitter=fitting.LevMarLSQFitter()):
+            fitter=fitting.SLSQPLSQFitter(),
+            return_fitter=False):
         """Fit this `~sbpy.thermal.NEATM` object to observational data
         via the target diameter and its subsolar temperature.
 
         Parameters
         ----------
-        init_diam : `~astropy.units.Quantity`, optional
-            Initial guess for the target's diameter. Default: ``1*u.km``
-        init_eta : float, optional
-            Initial guess for the target's infrared beaming parameter
-            :math:`\eta`. Default: ``1.0``
-        init_bondalbedo : float, optional
-            Initial guess for the target's Bond albedo. Default: ``0.05``
-        fitter : `~astropy.modeling.fitting` method, optional
-            Fitting method to be utilized. Default:
-            `~astropy.modeling.fitting.LevMarLSQFitter()`
+        init_diam: `~astropy.units.Quantity`, optional
+        Initial guess for the target's diameter. Default: ``1*u.km``
+        init_eta: float, optional
+        Initial guess for the target's infrared beaming parameter
+        : math: `\eta`. Default: ``1.0``
+        init_bondalbedo: float, optional
+        Initial guess for the target's Bond albedo. Default: ``0.05``
+        fitter: `~astropy.modeling.fitting` method, optional
+        Fitting method to be utilized. Default:
+        `~astropy.modeling.fitting.SLSQPLSQFitter()`
 
         Notes
         -----
@@ -712,12 +745,13 @@ class NEATM(ThermalClass, Fittable1DModel):
         try:
             self.phys['bondalbedo']
         except KeyError:
-            self.phys._table['bodalbedo'] = self._apply_unit(
+            self.phys._table['bondalbedo'] = self._apply_unit(
                 init_bondalbedo, u.dimensionless_unscaled)
 
         # initialize Fittable1DModel
         diam = self._apply_unit(self.phys['diam'][0], u.km)
-        eta = self._apply_unit(self.phys['eta'][0], u.dimensionless_unscaled)
+        eta = self._apply_unit(
+            self.phys['eta'][0], u.dimensionless_unscaled)
         bondalbedo = self._apply_unit(self.phys['bondalbedo'][0],
                                       u.dimensionless_unscaled)
 
@@ -727,8 +761,6 @@ class NEATM(ThermalClass, Fittable1DModel):
         lam = self.ephem['thermal_lam']
         flux = self.ephem['thermal_flux']
 
-        fitter = fitting.LevMarLSQFitter()
-
         fit = fitter(self, lam, flux)
 
         self.phys._table['diam'] = fit.diam
@@ -736,6 +768,9 @@ class NEATM(ThermalClass, Fittable1DModel):
         self.phys._table['bondalbedo'] = fit.bondalbedo
         self.calculate_subsolartemp()
         self.ephem._table['thermal_flux_fit'] = self.evaluate(lam)
+
+        if return_fitter:
+            return fit
 
     def evaluate(self, x, *args, jy=True):
         """Internal method to evaluate the underlying model. Users should
@@ -746,12 +781,12 @@ class NEATM(ThermalClass, Fittable1DModel):
         Parameters
         ----------
         x: `astropy.units` quantity, `~numpy.ndarray`, or list
-            Wavelengths at which to evaluate model. If a list of floats is
-            provided, wavelengths must be in units of micron.
-        jy : bool, optional
-            Flux density units to be used: if ``True``,
-            Janskys are used; if ``False``, units of
-            :math:`W m^{-1} {\mu}m^{-1}` are used. Default: ``True``
+        Wavelengths at which to evaluate model. If a list of floats is
+        provided, wavelengths must be in units of micron.
+        jy: bool, optional
+        Flux density units to be used: if ``True``,
+        Janskys are used; if ``False``, units of
+        : math: `W m ^ {-1} {\mu}m ^ {-1}` are used. Default: ``True``
 
         Notes
         -----
@@ -778,7 +813,6 @@ class NEATM(ThermalClass, Fittable1DModel):
             diam = self._apply_unit(args[0], u.km)
             bondalbedo = self._apply_unit(args[1], u.dimensionless_unscaled)
             eta = self._apply_unit(args[2], u.dimensionless_unscaled)
-
             self.phys._table['diam'] = diam
             self.phys._table['bondalbedo'] = bondalbedo
             self.phys._table['eta'] = eta
@@ -800,14 +834,14 @@ class NEATM(ThermalClass, Fittable1DModel):
 
 
 class NEATM_fixedeta(ThermalClass, Fittable1DModel):
-    """Implementation of the Near-Earth Asteroid Thermal Model (NEATM) as
-    defined by`Harris (1998)
+    """Implementation of the Near-Earth Asteroid Thermal Model(NEATM) as
+    defined by`Harris(1998)
     <https://ui.adsabs.harvard.edu/link_gateway/1998Icar..131..291H/doi:10.1006/icar.1997.5865>`_. This
     is the fixed-:math:`\eta` version of this model.
 
     This class derives from both `~sbpy.thermal.ThermalClass` and
     `~astropy.modeling.Fittable1DModel`. Fitting parameters are the target
-    diameter (``self.phys['diam']``) and the target Bond albedo
+    diameter(``self.phys['diam']``) and the target Bond albedo
     (``self.phys['bondalbedo']``).
 
     """
@@ -837,7 +871,7 @@ class NEATM_fixedeta(ThermalClass, Fittable1DModel):
     def __init__(self, *pargs):
         """If a `~sbpy.data.Phys` object is provided for initiation but
         does not contain a beaming parameter ``eta``,
-        :math:`\eta=1` is assumed."""
+        :math: `\eta = 1` is assumed."""
 
         ThermalClass.__init__(self, *pargs)
 
@@ -849,20 +883,20 @@ class NEATM_fixedeta(ThermalClass, Fittable1DModel):
                                  'eta')
 
     def fit(self, init_diam=1*u.km, init_subsolartemp=150*u.K,
-            fitter=fitting.LevMarLSQFitter()):
+            fitter=fitting.SLSQPLSQFitter()):
         """Fit this `~sbpy.thermal.NEATM` object to observational data
         via the target diameter and its subsolar temperature.
 
         Parameters
         ----------
-        init_diam : `~astropy.units.Quantity`, optional
+        init_diam: `~astropy.units.Quantity`, optional
             Initial guess for the target's diameter. Default: ``1*u.km``
-        init_subsolartemp : `~astropy.units.Quantity`, optional
+        init_subsolartemp: `~astropy.units.Quantity`, optional
             Initial guess for the target's mean subsolar temperature across
             all epochs in ``self.ephem``. Default: ``150*u.K``
-        fitter : `~astropy.modeling.fitting` method, optional
+        fitter: `~astropy.modeling.fitting` method, optional
             Fitting method to be utilized. Default:
-            `~astropy.modeling.fitting.LevMarLSQFitter()`
+            `~astropy.modeling.fitting.SLSQPLSQFitter()`
 
         Notes
         -----
@@ -899,8 +933,6 @@ class NEATM_fixedeta(ThermalClass, Fittable1DModel):
         lam = self.ephem['thermal_lam']
         flux = self.ephem['thermal_flux']
 
-        fitter = fitting.LevMarLSQFitter()
-
         fit = fitter(self, lam, flux)
 
         self.phys._table['diam'] = fit.diam
@@ -921,10 +953,10 @@ class NEATM_fixedeta(ThermalClass, Fittable1DModel):
         x: `astropy.units` quantity, `~numpy.ndarray`, or list
             Wavelengths at which to evaluate model. If a list of floats is
             provided, wavelengths must be in units of micron.
-        jy : bool, optional
+        jy: bool, optional
             Flux density units to be used: if ``True``,
             Janskys are used; if ``False``, units of
-            :math:`W m^{-1} {\mu}m^{-1}` are used. Default: ``True``
+            : math: `W m ^ {-1} {\mu}m ^ {-1}` are used. Default: ``True``
 
         Notes
         -----
