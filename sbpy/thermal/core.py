@@ -8,29 +8,69 @@ created on June 27, 2017
 import os
 import numpy as np
 from collections import OrderedDict
+import warnings
 
 import astropy.units as u
 from astropy import constants as const
 from astropy.modeling import fitting, Fittable1DModel, Parameter
 from astropy.table import vstack
+from astropy.utils.exceptions import AstropyUserWarning
 
 from .. import bib
 from ..data import Ephem, Phys
 from ._thermal import integrate_planck
 
 
-__all__ = ['ThermalClass', 'STM', 'FRM', 'NEATM', 'NEATM2',
-           'NEATM_fixedeta']
+__all__ = ['ThermalClass', 'STM', 'FRM', 'NEATM']
 
 
-class ThermalClass():
+class ThermalWarning(AstropyUserWarning):
+    """Warning related to `~sbpy.thermal` functionality."""
+
+
+class ThermalError(Exception):
+    """Exception related to `~sbpy.thermal` functionality."""
+
+
+class ThermalClass(Fittable1DModel):
     """Base class for thermal modeling. Objects instantiated from this
     class can be used to estimate thermal flux densities or fit thermal
-    flux observations to obtain target diameter and albedo estimates."""
+    flux observations based on the target diameter and subsolar temperatures.
+    Other properties like geometric albedo and the beaming parameter
+    :math:`\eta` can be derived from the latter.
+
+    All thermal models are derived from this class: `~sbpy.thermal.STM`,
+    `~sbpy.thermal.FRM`, and `~sbpy.thermal.NEATM`. The actual model
+    model implementations can be found as C extensions in
+    `~sbpy.thermal._thermal`; the implementations are accessible through
+    `~sbpy.thermal._thermal.integrate_planck`.
+    """
+
+    # define astropy.modeling.Fittable1DModel model parameters:
+    # target diameter
+    diam = Parameter(default=1, min=0, unit=u.km)
+    # subsolar temperature normalized to heliocentric distance of 1 au
+    subsolartemp_au = Parameter(default=150, min=0, unit=u.K)
+
+    # enable dimensionless input parameter (wavelength)
+    _input_units_allow_dimensionless = True
+
+    # input unit is a wavelength, assign unit equivalency
+    input_units_equivalencies = {'x': u.spectral()}
+
+    @property
+    def input_units(self):
+        """Define units of input data."""
+        return {'x': u.micron}
+
+    def _parameter_units_for_data_units(self, inputs_unit, outputs_unit):
+        """Defines units of model parameters."""
+        return OrderedDict([('subsolartemp_au', u.K),
+                            ('diam', u.km)])
 
     def __init__(self, *pargs):
         """A `ThermalClass` object can be instantiated with or without
-        keyword arguments as follows. If no arguments are provided,
+        keyword arguments as follows. If no arguments are provided, the
         ``from_data`` method can be used to instantiate an object. If
         ``phys`` and ``ephem`` are passed to the constructor, they are
         stored internally as ``self.phys`` and ``self.ephem``,
@@ -76,33 +116,25 @@ class ThermalClass():
 
         for parg in pargs:
             if isinstance(parg, Phys):
-                # create copies of input objects
+                if len(parg) > 1:
+                    parg._table = parg.table[0]
+                    warnings.warn(
+                        ("'phys' object has a length of {}, but currently "
+                         "only single-row objects are supported. All rows "
+                         "following the first row will be ignored.").format(
+                             len(self.phys)), ThermalWarning)
+                # create copies of input objects to not affect them outside
+                # this namespace
                 self.phys = Phys.from_table(parg.table)
             if isinstance(parg, Ephem):
                 self.ephem = Ephem.from_table(parg.table)
 
-        # assume emissivity=0.9 (Harris and Lagerros XXX) if none is provided
+        # assume emissivity=0.9 (Harris and Lagerros 2002) if none provided
         try:
             self.phys['emissivity']
         except KeyError:
             self.phys.add_column([0.9]*max([len(self.phys), 1]),
                                  'emissivity')
-
-        # # # assume ir_v_reflectance=1.4 (XXX) if not provided
-        # # try:
-        # #     phys['ir_v_reflectance']
-        # # except KeyError:
-        # #     phys.add_column([1.4]*max([len(phys), 1]), 'ir_v_reflectance')
-
-        # # fill other properties with nan if not provided
-        # for field in ['diam', 'pv', 'bondalbedo', 'subsolartemp']:
-        #     try:
-        #         phys[field]
-        #     except KeyError:
-        #         phys.add_column([np.nan]*max([len(phys), 1]), field)
-
-        # self.phys = phys.table
-        # self.eph = eph.table
 
     @property
     def get_phys(self):
@@ -114,9 +146,20 @@ class ThermalClass():
         """Returns full ephemerides object ``self.ephem``."""
         return self.ephem
 
-    def calculate_subsolartemp(self):
+    def calculate_subsolartemp(self, append_results=False):
         """Calculate the subsolar temperature based on the target's physical
         properties and observational circumstances.
+
+        Parameters
+        ----------
+        append_results : bool, optional
+            If `append_results=True`, results from this function are
+            appended to `self.ephem` (as the subsolar temperature depends
+            upon the heliocentric distance and is hence variable) and a
+            copy of `self.ephem` is returned;
+            if `append_results=False`,
+            subsolar temperatures for each epoch in `self.ephem` are simply
+            returned as a `~astropy.units.Quantity` object. Default: `False`
 
         Notes
         -----
@@ -128,16 +171,10 @@ class ThermalClass():
         This method requires the following fields in ``self.ephem``:
            * ``heliodist``: heliocentric distance of the target
 
-        Resulting subsolar temperatures are added as a column called
-        ``subsolartemp`` to ``self.ephem`` (not to ``self.phys`` as
-        the temperatures depend on heliocentric distances provided and
-        are hence variable and not a target physical property).
-
         Returns
         -------
-        `~sbpy.data.Ephem` object that is a copy of ``self.ephem``,
-        containing ``subsolartemp``.
-
+        `~astropy.units.Quantity` or `~sbpy.data.Ephem` object depending on
+        `append_results`.
         """
 
         subsolartemp = (const.L_sun/(4*np.pi*const.au.to(u.m)**2) *
@@ -146,32 +183,98 @@ class ThermalClass():
                          self.phys['eta'] *
                          const.sigma_sb*self.phys['emissivity']))**0.25
 
-        self.ephem._table['subsolartemp'] = subsolartemp
+        if append_results:
+            self.ephem._table['subsolartemp'] = subsolartemp
+            return Ephem.from_table(self.ephem.table)
+        else:
+            return subsolartemp
 
-        return self.ephem
+    def calculate_albedo(self, append_results=False):
+        """Calculate the geometric albedo and the Bond albedo based on
+        the target's physical properties.
 
-    def calculate_albedo(self):
+        Parameters
+        ----------
+        append_results : bool, optional
+            If `append_results=True`, results from this function are
+            appended to `self.phys` and a copy of `self.phys` is returned;
+            if `append_results=False`,
+            the geometric albedo and the Bond albedo are returned as as
+            a separate `~sbpy.data.Phys` object. Default: `False`
 
-        try:
-            self.phys['absmag']
-        except KeyError:
-            raise RuntimeError(("Albedo calculation requires 'absmag' in "
-                                "self.phys"))
+        Notes
+        -----
+        This method requires the following fields in ``self.phys``:
+           * ``diam``: target's diameter
+           * ``absmag``: target's absolute magnitude (V-band)
+           * ``slopepar``: target's photometric slope parameter TBD
 
-        try:
-            self.phys['diam']
-        except KeyError:
-            raise RuntimeError(("Albedo calculation requires 'diam' in "
-                                "self.phys"))
 
-        self.phys._table['pv'] = (
-            (1329/self.phys['diam'].to('km').value *
-             10**(-self.phys['absmag'].to('mag').value/5))**2)
+        Returns
+        -------
+        `~sbpy.data.Phys` object.
 
-        self.phys._table['bondalbedo'] = (
-            (0.29+0.684*0.15)*self.phys._table['pv'])
+        """
 
-        return self.phys
+        pv = ((1329/self.phys['diam'].to('km').value *
+               10**(-self.phys['absmag'].to('mag').value/5))**2)
+
+        # replace this in the future with functionality from
+        # sbpy.photometry
+        bondalbedo = ((0.29+0.684*self.phys['slopepar'])*pv)
+
+        if append_results:
+            self.phys['pv'] = pv
+            self.phys['bondalbedo'] = bondalbedo
+            return Phys.from_table(self.phys.table)
+        else:
+            return Phys.from_dict({'pv': pv,
+                                   'bondalbedo': bondalbedo})
+
+    def eta_from_subsolartemp(self, append_results=False):
+        """Calculate the beaming parameter :math:`\eta` from the target's
+        subsolar temperature, its physical properties, and observational
+        circumstances.
+
+        Parameters
+        ----------
+        append_results : bool, optional
+            If `append_results=True`, results from this function are
+            appended to `self.phys` and a copy of `self.phys` is returned;
+            if `append_results=False`, the beaming parameter :math:`\eta`
+            is returned as as a `~astropy.units.Quantity` object. Default:
+            `False`
+
+        Notes
+        -----
+        This method requires the following fields in ``self.phys``:
+           * ``bondalbedo``: target's Bond albedo
+           * ``emissivity``: target's emissivity
+
+        This method requires the following fields in ``self.ephem``:
+           * ``subsolartemp``: target's subsolar temperature per epoch
+           * ``heliodist``: target's heliocentric distance per epoch
+
+        Returns
+        -------
+        `~astropy.units.Quantity` or `~sbpy.data.Phys` object.
+
+        """
+
+        self.calculate_albedo(append_results=True)
+
+        eta = (const.L_sun/(4*np.pi*const.au.to(u.m)**2) *
+               (1.-self.phys['bondalbedo']) /
+               (self.ephem['heliodist'].to('au').value**2 *
+                self.ephem['subsolartemp']**4 *
+                const.sigma_sb*self.phys['emissivity']))
+        eta = np.mean(eta)
+
+        if append_results:
+            self.phys['eta'] = eta
+            return Phys.from_table(self.phys.table)
+        else:
+            return eta
 
     def calculate_flux(self, lam, jy=True):
         """Wrapper method to calculate flux density estimates.
@@ -220,7 +323,7 @@ class ThermalClass():
         try:
             self.ephem['subsolartemp']
         except KeyError:
-            self.calculate_subsolartemp()
+            self.calculate_subsolartemp(append_results=True)
 
         if not isinstance(lam, (list, tuple, np.ndarray)):
             lam = [lam]
@@ -295,75 +398,9 @@ class ThermalClass():
         else:
             return u.Quantity(value, unit)
 
-    @classmethod
-    def from_data(cls, phys, ephem, *pargs, **kwargs):
-        """Create a `~sbpy.thermal.ThermalClass` object by fitting
-        the corresponding thermal model to observations provided
-        through ``ephem``."""
-
-        self = cls(phys, ephem)
-        self.fit(*pargs, **kwargs)
-
-        return self
-
-
-class STM(ThermalClass, Fittable1DModel):
-    """Implementation of the Standard Thermal Model(STM) as defined by
-    `Morrison and Lebofsky(1979)
-    <https://ui.adsabs.harvard.edu/abs/1979aste.book..184M/abstract>`_
-    and `Lebofsky et al. (1986)
-    <https://ui.adsabs.harvard.edu/abs/1986Icar...68..239L/abstract>`_.
-
-    This class derives from both `~sbpy.thermal.ThermalClass` and
-    `~astropy.modeling.Fittable1DModel`. Fitting parameters are the target
-    diameter(``self.phys['diam']``) and the target subsolar temperature
-    (``self.ephem['subsolartemp']``).
-    """
-
-    # define astropy.modeling.Fittable1DModel model parameters:
-    # target diameter
-    diam = Parameter(default=1, min=0, unit=u.km)
-    # subsolar temperature normalized to heliocentric distance of 1 au
-    subsolartemp_au = Parameter(default=150, min=0, unit=u.K)
-
-    # enable dimensionless input parameter (wavelength)
-    _input_units_allow_dimensionless = True
-
-    # input unit is a wavelength, assign unit equivalency
-    input_units_equivalencies = {'x': u.spectral()}
-
-    @property
-    def input_units(self):
-        """Define units of input data."""
-        return {'x': u.micron}
-
-    def _parameter_units_for_data_units(self, inputs_unit, outputs_unit):
-        """Defines units of model parameters."""
-        return OrderedDict([('subsolartemp_au', u.K),
-                            ('diam', u.km)])
-
-    def __init__(self, *pargs):
-        """If a `~sbpy.data.Phys` object is provided for initiation but
-        does not contain a beaming parameter ``eta``,
-        : math: `\eta = 1` is assumed."""
-
-        ThermalClass.__init__(self, *pargs)
-
-        # assume eta=1.0 if none is provided
-        try:
-            self.phys['eta']
-        except KeyError:
-            self.phys.add_column([1.0]*max([len(self.phys), 1]),
-                                 'eta')
-
-        # register STM references
-        bib.register('sbpy.thermal.STM',
-                     {'method': ['1979aste.book..184M',
-                                 '1986Icar...68..239L']})
-
     def fit(self, init_diam=1*u.km, init_subsolartemp=150*u.K,
             fitter=fitting.SLSQPLSQFitter()):
-        """Fit this `~sbpy.thermal.STM` object to observational data
+        """Fit this `~sbpy.thermal.ThermalClass` object to observational data
         via the target diameter and its subsolar temperature.
 
         Parameters
@@ -420,6 +457,50 @@ class STM(ThermalClass, Fittable1DModel):
             np.sqrt(self.ephem['heliodist'].to('au').data))
 
         self.ephem._table['thermal_flux_fit'] = self.evaluate(lam)
+
+    @classmethod
+    def from_data(cls, phys, ephem, *pargs, **kwargs):
+        """Create a `~sbpy.thermal.ThermalClass` object by fitting
+        the corresponding thermal model to observations provided
+        through ``ephem``."""
+
+        self = cls(phys, ephem)
+        self.fit(*pargs, **kwargs)
+
+        return self
+
+
+class STM(ThermalClass):
+    """Implementation of the Standard Thermal Model(STM) as defined by
+    `Morrison and Lebofsky(1979)
+    <https://ui.adsabs.harvard.edu/abs/1979aste.book..184M/abstract>`_
+    and `Lebofsky et al. (1986)
+    <https://ui.adsabs.harvard.edu/abs/1986Icar...68..239L/abstract>`_.
+
+    This class derives from both `~sbpy.thermal.ThermalClass` and
+    `~astropy.modeling.Fittable1DModel`. Fitting parameters are the target
+    diameter(``self.phys['diam']``) and the target subsolar temperature
+    (``self.ephem['subsolartemp']``).
+    """
+
+    def __init__(self, *pargs):
+        """If a `~sbpy.data.Phys` object is provided for initiation but
+        does not contain a beaming parameter ``eta``,
+        : math: `\eta = 1` is assumed."""
+
+        ThermalClass.__init__(self, *pargs)
+
+        # assume eta=1.0 if none is provided
+        try:
+            self.phys['eta']
+        except KeyError:
+            self.phys.add_column([1.0]*max([len(self.phys), 1]),
+                                 'eta')
+
+        # register STM references
+        bib.register('sbpy.thermal.STM',
+                     {'method': ['1979aste.book..184M',
+                                 '1986Icar...68..239L']})
 
     def evaluate(self, x, *args, jy=True):
         """Internal method to evaluate the underlying model. Users should
@@ -483,8 +564,20 @@ class STM(ThermalClass, Fittable1DModel):
         else:
             return flux
 
+    @classmethod
+    def from_data(cls, phys, ephem, *pargs, **kwargs):
+        """Create a `~sbpy.thermal.ThermalClass` object by fitting
+        the corresponding thermal model to observations provided
+        through ``ephem``."""
 
-class FRM(ThermalClass, Fittable1DModel):
+        self = ThermalClass.from_data(*pargs, **kwargs)
+
+        # derive albedos based on subsolartemp and eta
+
+        return self
+
+
+class FRM(ThermalClass):
     """Implementation of the Fast Rotating Model(FRM) as defined by
     `Lebofsky and Spencer(1989)
     <https://ui.adsabs.harvard.edu/abs/1989aste.conf..128L/abstract>`_.
@@ -494,28 +587,6 @@ class FRM(ThermalClass, Fittable1DModel):
     diameter(``self.phys['diam']``) and the target subsolar temperature
     (``self.ephem['subsolartemp']``).
     """
-
-    # define astropy.modeling.Fittable1DModel model parameters:
-    # target diameter
-    diam = Parameter(default=1, min=0, unit=u.km)
-    # subsolar temperature normalized to heliocentric distance of 1 au
-    subsolartemp_au = Parameter(default=150, min=0, unit=u.K)
-
-    # enable dimensionless input parameter (wavelength)
-    _input_units_allow_dimensionless = True
-
-    # input unit is a wavelength, assign unit equivalency
-    input_units_equivalencies = {'x': u.spectral()}
-
-    @property
-    def input_units(self):
-        """Define units of input data."""
-        return {'x': u.micron}
-
-    def _parameter_units_for_data_units(self, inputs_unit, outputs_unit):
-        """Defines units of model parameters."""
-        return OrderedDict([('subsolartemp_au', u.K),
-                            ('diam', u.km)])
 
     def __init__(self, *pargs):
         """If a `~sbpy.data.Phys` object is provided for initiation but
@@ -533,66 +604,6 @@ class FRM(ThermalClass, Fittable1DModel):
 
         # register FRM references
         bib.register('sbpy.thermal.FRM', {'method': '1989aste.conf..128L'})
-
-    def fit(self, init_diam=1*u.km, init_subsolartemp=150*u.K,
-            fitter=fitting.SLSQPLSQFitter()):
-        """Fit this `~sbpy.thermal.FRM` object to observational data
-        via the target diameter and its subsolar temperature.
-
-        Parameters
-        ----------
-        init_diam: `~astropy.units.Quantity`, optional
-           Initial guess for the target's diameter. Default: ``1*u.km``
-        init_subsolartemp: `~astropy.units.Quantity`, optional
-           Initial guess for the target's mean subsolar temperature across
-           all epochs in ``self.ephem``. Default: ``150*u.K``
-        fitter: `~astropy.modeling.fitting` method, optional
-           Fitting method to be utilized. Default:
-           `~astropy.modeling.fitting.SLSQPLSQFitter()`
-
-        Notes
-        -----
-        If ``self.phys`` does not contain ``diam``, this field is
-        created using the value of ``init_diam``. If ``self.ephem``
-        does not contain ``subsolartemp``, this field is created using the
-        value of ``init_subsolartemp``.
-
-        In order to account for the target's potentially different
-        heliocentric distances as provided by ``self.ephem``, the subsolar
-        temperature divided by the square-root of the respective
-        heliocentric distance is actually used as a fitting parameter.
-        """
-
-        # initialize parameters if not yet done
-        try:
-            self.phys['diam']
-        except KeyError:
-            self.phys.table['diam'] = self._apply_unit(init_diam, u.km)
-        try:
-            self.ephem['subsolartemp']
-        except KeyError:
-            self.ephem._table['subsolartemp'] = self._apply_unit(
-                init_subsolartemp, u.K)
-
-        # initialize Fittable1DModel
-        diam = self._apply_unit(self.phys['diam'][0], u.km)
-        subsolartemp_au = self._apply_unit(
-            np.mean(self.ephem['subsolartemp'] *
-                    np.sqrt(self.ephem['heliodist'].to('au').data)), u.K)
-        Fittable1DModel.__init__(self, diam, subsolartemp_au)
-
-        # extract wavelengths and fluxes from self.ephem
-        lam = self.ephem['thermal_lam']
-        flux = self.ephem['thermal_flux']
-
-        fit = fitter(self, lam, flux)
-
-        self.phys._table['diam'] = fit.diam
-        self.ephem._table['subsolartemp'] = (
-            fit.subsolartemp_au /
-            np.sqrt(self.ephem['heliodist'].to('au').data))
-
-        self.ephem._table['thermal_flux_fit'] = self.evaluate(lam)
 
     def evaluate(self, x, *args, jy=True):
         """Internal method to evaluate the underlying model. Users should
@@ -659,185 +670,6 @@ class NEATM(ThermalClass, Fittable1DModel):
     """Implementation of the Near-Earth Asteroid Thermal Model(NEATM) as
     defined by`Harris(1998)
     <https://ui.adsabs.harvard.edu/link_gateway/1998Icar..131..291H/doi:10.1006/icar.1997.5865>`_. This
-    is the floating-:math:`\eta` version of this model.
-
-    This class derives from both `~sbpy.thermal.ThermalClass` and
-    `~astropy.modeling.Fittable1DModel`. Fitting parameters are the target
-    diameter(``self.phys['diam']``), the target Bond albedo
-    (``self.phys['bondalbedo']``), and the target infrared beaming parameter
-    (``self.phys['eta']``).
-
-    """
-    # define astropy.modeling.Fittable1DModel model parameters:
-    # target diameter
-    diam = Parameter(default=1, min=0, unit=u.km)
-    # target bond albedo
-    bondalbedo = Parameter(default=0.05, min=1e-5, max=1,
-                           unit=u.dimensionless_unscaled)
-    # target infrared beaming parameter
-    eta = Parameter(default=1, min=0, max=10,
-                    unit=u.dimensionless_unscaled)
-
-    # enable dimensionless input parameter (wavelength)
-    _input_units_allow_dimensionless = True
-
-    # input unit is a wavelength, assign unit equivalency
-    input_units_equivalencies = {'x': u.spectral()}
-
-    @property
-    def input_units(self):
-        """Define units of input data."""
-        return {'x': u.micron}
-
-    def _parameter_units_for_data_units(self, inputs_unit, outputs_unit):
-        """Defines units of model parameters."""
-        return OrderedDict([('bondalbedo', u.dimensionless_unscaled),
-                            ('diam', u.km),
-                            ('eta', u.dimensionless_unscaled)])
-
-    def __init__(self, *pargs):
-
-        ThermalClass.__init__(self, *pargs)
-
-        # register NEATM references
-        bib.register('sbpy.thermal.NEATM',
-                     {'method': '1998Icar..131..291H'})
-
-    def fit(self, init_diam=1*u.km, init_eta=1.0,
-            init_bondalbedo=0.05,
-            fitter=fitting.SLSQPLSQFitter(),
-            return_fitter=False):
-        """Fit this `~sbpy.thermal.NEATM` object to observational data
-        via the target diameter and its subsolar temperature.
-
-        Parameters
-        ----------
-        init_diam: `~astropy.units.Quantity`, optional
-        Initial guess for the target's diameter. Default: ``1*u.km``
-        init_eta: float, optional
-        Initial guess for the target's infrared beaming parameter
-        : math: `\eta`. Default: ``1.0``
-        init_bondalbedo: float, optional
-        Initial guess for the target's Bond albedo. Default: ``0.05``
-        fitter: `~astropy.modeling.fitting` method, optional
-        Fitting method to be utilized. Default:
-        `~astropy.modeling.fitting.SLSQPLSQFitter()`
-
-        Notes
-        -----
-        If ``self.phys`` does not contain ``diam``, this field is
-        created using the value of ``init_diam``. If ``self.phys``
-        does not contain ``eta``, this field is created using the
-        value of ``init_eta``. If ``self.phys``
-        does not contain ``bondalbedo``, this field is created using the
-        value of ``init_bondalbedo``.
-        """
-
-        # initialize parameters if not yet done
-        try:
-            self.phys['diam']
-        except KeyError:
-            self.phys.table['diam'] = self._apply_unit(init_diam, u.km)
-        try:
-            self.phys['eta']
-        except KeyError:
-            self.phys._table['eta'] = self._apply_unit(
-                init_eta, u.dimensionless_unscaled)
-        try:
-            self.phys['bondalbedo']
-        except KeyError:
-            self.phys._table['bondalbedo'] = self._apply_unit(
-                init_bondalbedo, u.dimensionless_unscaled)
-
-        # initialize Fittable1DModel
-        diam = self._apply_unit(self.phys['diam'][0], u.km)
-        eta = self._apply_unit(
-            self.phys['eta'][0], u.dimensionless_unscaled)
-        bondalbedo = self._apply_unit(self.phys['bondalbedo'][0],
-                                      u.dimensionless_unscaled)
-
-        Fittable1DModel.__init__(self, diam, bondalbedo, eta)
-
-        # extract wavelengths and fluxes from self.ephem
-        lam = self.ephem['thermal_lam']
-        flux = self.ephem['thermal_flux']
-
-        fit = fitter(self, lam, flux)
-
-        self.phys._table['diam'] = fit.diam
-        self.phys._table['eta'] = fit.eta
-        self.phys._table['bondalbedo'] = fit.bondalbedo
-        self.calculate_subsolartemp()
-        self.ephem._table['thermal_flux_fit'] = self.evaluate(lam)
-
-        if return_fitter:
-            return fit
-
-    def evaluate(self, x, *args, jy=True):
-        """Internal method to evaluate the underlying model. Users should
-        not call this method direclty, but instead call
-        `~sbpy.thermal.ThermalClass.calculate_flux` to
-        obtain a flux density estimate.
-
-        Parameters
-        ----------
-        x: `astropy.units` quantity, `~numpy.ndarray`, or list
-        Wavelengths at which to evaluate model. If a list of floats is
-        provided, wavelengths must be in units of micron.
-        jy: bool, optional
-        Flux density units to be used: if ``True``,
-        Janskys are used; if ``False``, units of
-        : math: `W m ^ {-1} {\mu}m ^ {-1}` are used. Default: ``True``
-
-        Notes
-        -----
-        This method requires the following fields in ``self.phys``:
-           * ``diam``: target diameter
-           * ``emissivity``: target emissivity
-           * ``eta``: target infrared beaming parameter
-
-        This method requires the following fields in ``self.ephem``:
-           * ``heliodist``: heliocentric distance of the target
-           * ``obsdist``: distance of the target from the observer
-           * ``subsolartemp``: subsolar temperature for each epoch
-        """
-
-        _no_unit = False
-        if not hasattr(x, 'unit'):
-            _no_unit = True
-
-        # set parameters and input as quantities
-        x = self._apply_unit(x, u.micron)
-
-        # use *args, if provided...
-        if len(args) == 3:
-            diam = self._apply_unit(args[0], u.km)
-            bondalbedo = self._apply_unit(args[1], u.dimensionless_unscaled)
-            eta = self._apply_unit(args[2], u.dimensionless_unscaled)
-            self.phys._table['diam'] = diam
-            self.phys._table['bondalbedo'] = bondalbedo
-            self.phys._table['eta'] = eta
-            self.calculate_subsolartemp()
-        # or pull the parameters from self.phys
-        else:
-            diam = self._apply_unit(self.phys['diam'][0], u.km)
-            bondalbedo = self._apply_unit(self.phys['bondalbedo'][0],
-                                          u.dimensionless_unscaled)
-            eta = self._apply_unit(self.phys['eta'][0],
-                                   u.dimensionless_unscaled)
-
-        flux = self._flux(3, x, jy)/np.pi
-
-        if _no_unit:
-            return flux.value
-        else:
-            return flux
-
-
-class NEATM2(ThermalClass, Fittable1DModel):
-    """Implementation of the Near-Earth Asteroid Thermal Model(NEATM) as
-    defined by`Harris(1998)
-    <https://ui.adsabs.harvard.edu/link_gateway/1998Icar..131..291H/doi:10.1006/icar.1997.5865>`_. This
     is the fixed-:math:`\eta` version of this model.
 
     This class derives from both `~sbpy.thermal.ThermalClass` and
@@ -846,28 +678,6 @@ class NEATM2(ThermalClass, Fittable1DModel):
     (``self.phys['bondalbedo']``).
 
     """
-
-    # define astropy.modeling.Fittable1DModel model parameters:
-    # target diameter
-    diam = Parameter(default=1, min=0, unit=u.km)
-    # subsolar temperature normalized to heliocentric distance of 1 au
-    subsolartemp_au = Parameter(default=150, min=0, unit=u.K)
-
-    # enable dimensionless input parameter (wavelength)
-    _input_units_allow_dimensionless = True
-
-    # input unit is a wavelength, assign unit equivalency
-    input_units_equivalencies = {'x': u.spectral()}
-
-    @property
-    def input_units(self):
-        """Define units of input data."""
-        return {'x': u.micron}
-
-    def _parameter_units_for_data_units(self, inputs_unit, outputs_unit):
-        """Defines units of model parameters."""
-        return OrderedDict([('subsolartemp_au', u.K),
-                            ('diam', u.km)])
 
     def __init__(self, *pargs):
         """If a `~sbpy.data.Phys` object is provided for initiation but
@@ -882,246 +692,6 @@ class NEATM2(ThermalClass, Fittable1DModel):
         except KeyError:
             self.phys.add_column([1.0]*max([len(self.phys), 1]),
                                  'eta')
-
-    def fit(self, init_diam=1*u.km, init_subsolartemp=150*u.K,
-            fitter=fitting.SLSQPLSQFitter()):
-        """Fit this `~sbpy.thermal.NEATM` object to observational data
-        via the target diameter and its subsolar temperature.
-
-        Parameters
-        ----------
-        init_diam: `~astropy.units.Quantity`, optional
-            Initial guess for the target's diameter. Default: ``1*u.km``
-        init_subsolartemp: `~astropy.units.Quantity`, optional
-            Initial guess for the target's mean subsolar temperature across
-            all epochs in ``self.ephem``. Default: ``150*u.K``
-        fitter: `~astropy.modeling.fitting` method, optional
-            Fitting method to be utilized. Default:
-            `~astropy.modeling.fitting.SLSQPLSQFitter()`
-
-        Notes
-        -----
-        If ``self.phys`` does not contain ``diam``, this field is
-        created using the value of ``init_diam``. If ``self.ephem``
-        does not contain ``subsolartemp``, this field is created using the
-        value of ``init_subsolartemp``.
-
-        In order to account for the target's potentially different
-        heliocentric distances as provided by ``self.ephem``, the subsolar
-        temperature divided by the square-root of the respective
-        heliocentric distance is actually used as a fitting parameter.
-        """
-
-        # initialize parameters if not yet done
-        try:
-            self.phys['diam']
-        except KeyError:
-            self.phys.table['diam'] = self._apply_unit(init_diam, u.km)
-        try:
-            self.ephem['subsolartemp']
-        except KeyError:
-            self.ephem._table['subsolartemp'] = self._apply_unit(
-                init_subsolartemp, u.K)
-
-        # initialize Fittable1DModel
-        diam = self._apply_unit(self.phys['diam'][0], u.km)
-        subsolartemp_au = self._apply_unit(
-            np.mean(self.ephem['subsolartemp'] *
-                    np.sqrt(self.ephem['heliodist'].to('au').data)), u.K)
-        Fittable1DModel.__init__(self, diam, subsolartemp_au)
-
-        # extract wavelengths and fluxes from self.ephem
-        lam = self.ephem['thermal_lam']
-        flux = self.ephem['thermal_flux']
-
-        fit = fitter(self, lam, flux)
-
-        self.phys._table['diam'] = fit.diam
-        self.ephem._table['subsolartemp'] = (
-            fit.subsolartemp_au /
-            np.sqrt(self.ephem['heliodist'].to('au').data))
-
-        self.ephem._table['thermal_flux_fit'] = self.evaluate(lam)
-
-    def evaluate(self, x, *pargs, jy=True):
-        """Internal method to evaluate the underlying model. Users should
-        not call this method direclty, but instead call
-        `~sbpy.thermal.ThermalClass.calculate_flux` to
-        obtain a flux density estimate.
-
-        Parameters
-        ----------
-        x: `astropy.units` quantity, `~numpy.ndarray`, or list
-            Wavelengths at which to evaluate model. If a list of floats is
-            provided, wavelengths must be in units of micron.
-        jy: bool, optional
-            Flux density units to be used: if ``True``,
-            Janskys are used; if ``False``, units of
-            : math: `W m ^ {-1} {\mu}m ^ {-1}` are used. Default: ``True``
-
-        Notes
-        -----
-        This method requires the following fields in ``self.phys``:
-           * ``diam``: target diameter
-           * ``emissivity``: target emissivity
-
-        This method requires the following fields in ``self.ephem``:
-           * ``heliodist``: heliocentric distance of the target
-           * ``obsdist``: distance of the target from the observer
-           * ``subsolartemp``: subsolar temperature for each epoch
-        """
-        _no_unit = False
-        if not hasattr(x, 'unit'):
-            _no_unit = True
-
-        # set parameters and input as quantities
-        x = self._apply_unit(x, u.micron)
-
-        # use pargs, if provided...
-        if len(pargs) == 2:
-            diam = self._apply_unit(pargs[0], u.km)
-            subsolartemp_au = self._apply_unit(pargs[1][0], u.K,
-                                               equiv=u.temperature())
-
-            self.phys._table['diam'] = diam
-            self.ephem._table['subsolartemp'] = (
-                subsolartemp_au /
-                np.sqrt(self.ephem['heliodist'].to('au').data))
-            # or pull the parameters from self.phys
-        else:
-            diam = self._apply_unit(self.phys['diam'][0], u.km)
-            subsolartemp_au = self._apply_unit(
-                np.mean(self.ephem['subsolartemp'] *
-                        np.sqrt(self.ephem['heliodist'].to('au').data)),
-                u.K)
-
-        flux = self._flux(3, x, jy)/np.pi
-
-        if _no_unit:
-            return flux.value
-        else:
-            return flux
-
-    def eta_from_subsolartemp(self):
-
-        self.calculate_albedo()
-
-        # self.phys._table['eta'] =
-        print((const.L_sun/(4*np.pi*const.au.to(u.m)**2) *
-               (1.-self.phys['bondalbedo']) /
-               (self.ephem['heliodist'].to('au').value**2 *
-                self.ephem['subsolartemp']**4 *
-                const.sigma_sb*self.phys['emissivity'])))
-
-
-class NEATM_fixedeta(ThermalClass, Fittable1DModel):
-    """Implementation of the Near-Earth Asteroid Thermal Model(NEATM) as
-    defined by`Harris(1998)
-    <https://ui.adsabs.harvard.edu/link_gateway/1998Icar..131..291H/doi:10.1006/icar.1997.5865>`_. This
-    is the fixed-:math:`\eta` version of this model.
-
-    This class derives from both `~sbpy.thermal.ThermalClass` and
-    `~astropy.modeling.Fittable1DModel`. Fitting parameters are the target
-    diameter(``self.phys['diam']``) and the target Bond albedo
-    (``self.phys['bondalbedo']``).
-
-    """
-
-    # define astropy.modeling.Fittable1DModel model parameters:
-    # target diameter
-    diam = Parameter(default=1, min=0, unit=u.km)
-    # subsolar temperature normalized to heliocentric distance of 1 au
-    subsolartemp_au = Parameter(default=150, min=0, unit=u.K)
-
-    # enable dimensionless input parameter (wavelength)
-    _input_units_allow_dimensionless = True
-
-    # input unit is a wavelength, assign unit equivalency
-    input_units_equivalencies = {'x': u.spectral()}
-
-    @property
-    def input_units(self):
-        """Define units of input data."""
-        return {'x': u.micron}
-
-    def _parameter_units_for_data_units(self, inputs_unit, outputs_unit):
-        """Defines units of model parameters."""
-        return OrderedDict([('subsolartemp_au', u.K),
-                            ('diam', u.km)])
-
-    def __init__(self, *pargs):
-        """If a `~sbpy.data.Phys` object is provided for initiation but
-        does not contain a beaming parameter ``eta``,
-        :math: `\eta = 1` is assumed."""
-
-        ThermalClass.__init__(self, *pargs)
-
-        # assume eta=1 if none is provided
-        try:
-            self.phys['eta']
-        except KeyError:
-            self.phys.add_column([1.0]*max([len(self.phys), 1]),
-                                 'eta')
-
-    def fit(self, init_diam=1*u.km, init_subsolartemp=150*u.K,
-            fitter=fitting.SLSQPLSQFitter()):
-        """Fit this `~sbpy.thermal.NEATM` object to observational data
-        via the target diameter and its subsolar temperature.
-
-        Parameters
-        ----------
-        init_diam: `~astropy.units.Quantity`, optional
-            Initial guess for the target's diameter. Default: ``1*u.km``
-        init_subsolartemp: `~astropy.units.Quantity`, optional
-            Initial guess for the target's mean subsolar temperature across
-            all epochs in ``self.ephem``. Default: ``150*u.K``
-        fitter: `~astropy.modeling.fitting` method, optional
-            Fitting method to be utilized. Default:
-            `~astropy.modeling.fitting.SLSQPLSQFitter()`
-
-        Notes
-        -----
-        If ``self.phys`` does not contain ``diam``, this field is
-        created using the value of ``init_diam``. If ``self.ephem``
-        does not contain ``subsolartemp``, this field is created using the
-        value of ``init_subsolartemp``.
-
-        In order to account for the target's potentially different
-        heliocentric distances as provided by ``self.ephem``, the subsolar
-        temperature divided by the square-root of the respective
-        heliocentric distance is actually used as a fitting parameter.
-        """
-
-        # initialize parameters if not yet done
-        try:
-            self.phys['diam']
-        except KeyError:
-            self.phys.table['diam'] = self._apply_unit(init_diam, u.km)
-        try:
-            self.ephem['subsolartemp']
-        except KeyError:
-            self.ephem._table['subsolartemp'] = self._apply_unit(
-                init_subsolartemp, u.K)
-
-        # initialize Fittable1DModel
-        diam = self._apply_unit(self.phys['diam'][0], u.km)
-        subsolartemp_au = self._apply_unit(
-            np.mean(self.ephem['subsolartemp'] *
-                    np.sqrt(self.ephem['heliodist'].to('au').data)), u.K)
-        Fittable1DModel.__init__(self, diam, subsolartemp_au)
-
-        # extract wavelengths and fluxes from self.ephem
-        lam = self.ephem['thermal_lam']
-        flux = self.ephem['thermal_flux']
-
-        fit = fitter(self, lam, flux)
-
-        self.phys._table['diam'] = fit.diam
-        self.ephem._table['subsolartemp'] = (
-            fit.subsolartemp_au /
-            np.sqrt(self.ephem['heliodist'].to('au').data))
-
-        self.ephem._table['thermal_flux_fit'] = self.evaluate(lam)
 
     def evaluate(self, x, *pargs, jy=True):
         """Internal method to evaluate the underlying model. Users should
