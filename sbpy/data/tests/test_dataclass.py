@@ -44,6 +44,9 @@ def test_get_set():
     with pytest.raises(KeyError):
         data['d']
 
+    # test setter
+    data['d'] = [1, 2, 3]
+
 
 def test_creation_single():
     """ test the creation of DataClass objects from dicts or arrays;

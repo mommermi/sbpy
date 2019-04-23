@@ -295,6 +295,10 @@ class DataClass():
         (``self._table.__repr__()``)"""
         return self._table.__repr__()
 
+    def __setitem__(self, key, value):
+        """Set column or row on data table."""
+        self._table[key] = value
+
     def __getitem__(self, ident):
         """Return columns or rows from data table (``self._table``); checks
         for and may use alternative field names."""
