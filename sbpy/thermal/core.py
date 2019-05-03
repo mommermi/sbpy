@@ -435,104 +435,181 @@ class ThermalClass(Fittable1DModel):
         else:
             return absmag
 
-    # def calculate_pv_from_bondalbedo(self, append_results=False):
-    #     """Calculate the geometric albedo and the Bond albedo based on
-    #     the target's physical properties.
-
-    #     Parameters
-    #     ----------
-    #     append_results : bool, optional
-    #         If `append_results=True`, results from this function are
-    #         appended to `self.phys` and a copy of `self.phys` is returned;
-    #         if `append_results=False`,
-    #         the geometric albedo and the Bond albedo are returned as as
-    #         a separate `~sbpy.data.Phys` object. Default: `False`
-
-    #     Notes
-    #     -----
-    #     This method requires the following fields in ``self.phys``:
-    #        * ``diam``: target's diameter
-    #        * ``absmag``: target's absolute magnitude (V-band)
-    #        * ``slopepar``: target's photometric slope parameter TBD
-
-    #     Returns
-    #     -------
-    #     `~sbpy.data.Phys` object.
-    #     """
-
-    #     pv = (self.phys['bondalbedo'][0] /
-    #           (0.29+0.684*self.phys['G'][0]))
-
-    #     if append_results:
-    #         self.phys['pv'] = pv
-    #         return Phys.from_table(self.phys.table)
-    #     else:
-    #         return Phys.from_dict({'pv': pv}),
-
-    #     if all([f in self.phys.column_names for f in ['G', 'pv']):
-
-    #     if 'H' in self.phys.column_names:
-
-    #     # ref goes here
-    #     pv = ((1329/self.phys['diam'].to('km').value *
-    #            10**(-self.phys['H'].to('mag').value/5))**2)
-
-    #     bondalbedo_from_pv = pv*(0.29+0.684*self.phys['G'][0])
-
-    #     print('bondalbedos', self.phys['bondalbedo'][0], bondalbedo_from_pv)
-
-    #     print('pvs', pv, pv_from_bondalbedo)
-    #     if append_results:
-    #         self.phys['pv'] = pv
-    #         return Phys.from_table(self.phys.table)
-    #     else:
-    #         return Phys.from_dict({'pv': pv}),
-    #         # 'bondalbedo': bondalbedo})
-
-    def eta_from_subsolartemp(self, append_results=False):
-        """Calculate the beaming parameter :math:`\eta` from the target's
-        subsolar temperature, its physical properties, and observational
-        circumstances.
+    def calculate_pv_from_bondalbedo(self, append_results=False, **kwargs):
+        """Calculate the target's geometric albedo (V-band) from its Bond
+        albedo.
 
         Parameters
         ----------
         append_results : bool, optional
             If `append_results=True`, results from this function are
             appended to `self.phys` and a copy of `self.phys` is returned;
-            if `append_results=False`, the beaming parameter :math:`\eta`
-            is returned as as a `~astropy.units.Quantity` object. Default:
-            `False`
+            if `append_results=False`,
+            the geometric albedo and the Bond albedo are returned as as
+            a separate `~sbpy.data.Phys` object. Default: `False`
 
         Notes
         -----
-        This method requires the following fields in ``self.phys``:
+        This method requires the following field in ``self.phys``:
            * ``bondalbedo``: target's Bond albedo
-           * ``emissivity``: target's emissivity
 
-        This method requires the following fields in ``self.ephem``:
-           * ``subsolartemp``: target's subsolar temperature per epoch
-           * ``heliodist``: target's heliocentric distance per epoch
+        The photometric slop parameter ``G`` can be provided; if it is not
+        provided it defaults to ``G=0.15``.
+
+        Alternatively, these properties can also be provided as
+        keyword arguments (see example below). In that case, both
+        quantities are assumed to be dimensionless.
 
         Returns
         -------
-        `~astropy.units.Quantity` or `~sbpy.data.Phys` object.
+        `astropy.units.Quantity` object or `~sbpy.data.Phys` object (if
+        ``append_results=True``).
 
+        Examples
+        --------
+        This function can be called to use the properties stored in
+        ``self.phys``; the following example obtains the physical properties
+        of asteroid Ceres from JPL SBDB and calculates its Bond albedo
+        from its geometric albedo and photometric slope parameter:
+        >>> from sbpy.data import Phys
+        >>> from sbpy.thermal import STM
+        >>> phys = Phys.from_dict({'bondalbedo': 0.03, 'G': 0.15})
+        >>> stm = STM(phys)  # any other model type could be used here
+        >>> stm.calculate_pv_from_bondalbedo(append_results=True)
+        <QTable length=1>
+        bondalbedo    G    emissivity          pv
+
+         float64   float64  float64         float64
+        ---------- ------- ---------- -------------------
+              0.03    0.15        0.9 0.07641365257259297
+
+        This example uses keyword arguments to pass the input parameters
+        and returns the results as a `~astropy.units.Quantity` object:
+        >>> STM().calculate_pv_from_bondalbedo(bondalbedo=0.03)
+        <Quantity 0.07641365>
         """
+        # from sbpy.photometry import HG
 
-        self.calculate_albedo(append_results=True)
+        if 'bondalbedo' in kwargs.keys():
+            bondalbedo = self._apply_unit(kwargs['bondalbedo'],
+                                          u.dimensionless_unscaled)
+        else:
+            bondalbedo = self._apply_unit(self.phys['bondalbedo'],
+                                          u.dimensionless_unscaled)
 
-        eta = (const.L_sun/(4*np.pi*const.au.to(u.m)**2) *
-               (1.-self.phys['bondalbedo']) /
-               (self.ephem['heliodist'].to('au').value**2 *
-                self.ephem['subsolartemp']**4 *
-                const.sigma_sb*self.phys['emissivity']))
-        eta = np.mean(eta)
+        if 'G' in kwargs.keys():
+            slopepar = self._apply_unit(kwargs['G'],
+                                        u.dimensionless_unscaled)
+        elif 'G' in self.phys.column_names:
+            slopepar = self._apply_unit(self.phys['G'],
+                                        u.dimensionless_unscaled)
+        else:
+            slopepar = 0.15
+            if append_results:
+                self.phys['G'] = slopepar
+
+        # # use HG photometric model (any other model could be used)
+        # photmodel = HG(H=absmag, geoalb=pv, G=0.15)
+        # # hard-code G here as it is irrelevant for this calculation
+        # photometry does not yet provide a way to initialize models
+        # with albedo (submitted as #146)
+
+        # use this kludge until #146 is closed
+        pv = bondalbedo/(0.29+0.684*slopepar)
 
         if append_results:
-            self.ephem['eta'] = eta
-            return Ephem.from_table(self.ephem.table)
+            self.phys['pv'] = pv
+            return Phys.from_table(self.phys.table)
         else:
-            return eta
+            return pv
+
+    def calculate_bondalbedo_from_pv(self, append_results=False, **kwargs):
+        """Calculate the target's Bond albedo from its geometric
+        albedo (V-band).
+
+        Parameters
+        ----------
+        append_results : bool, optional
+            If `append_results=True`, results from this function are
+            appended to `self.phys` and a copy of `self.phys` is returned;
+            if `append_results=False`,
+            the geometric albedo and the Bond albedo are returned as as
+            a separate `~sbpy.data.Phys` object. Default: `False`
+
+        Notes
+        -----
+        This method requires the following field in ``self.phys``:
+           * ``pv``: target's geometric albedo (V-band)
+
+        The photometric slop parameter ``G`` can be provided; if it is not
+        provided it defaults to ``G=0.15``.
+
+        Alternatively, the property can also be provided as
+        keyword arguments (see example below). In that case, it is assumed
+        to be dimensionless.
+
+        Returns
+        -------
+        `astropy.units.Quantity` object or `~sbpy.data.Phys` object (if
+        ``append_results=True``).
+
+        Examples
+        --------
+        This function can be called to use the properties stored in
+        ``self.phys``; the following example obtains the physical properties
+        of asteroid Ceres from JPL SBDB and calculates its Bond albedo
+        from its geometric albedo and photometric slope parameter:
+        >>> from sbpy.data import Phys
+        >>> from sbpy.thermal import STM
+        >>> phys = Phys.from_dict({'pv': 0.076, 'G': 0.15})
+        >>> stm = STM(phys)  # any other model type could be used here
+        >>> stm.calculate_bondalbedo_from_pv(append_results=True)
+        <QTable length=1>
+           pv      G    emissivity bondalbedo
+
+        float64 float64  float64    float64
+        ------- ------- ---------- ----------
+          0.076    0.15        0.9  0.0298376
+        <Quantity 0.0298376>
+        This example uses keyword arguments to pass the input parameters
+        and returns the results as a `~astropy.units.Quantity` object:
+        >>> STM().calculate_bondalbedo_from_pv(pv=0.076)
+
+        """
+        # from sbpy.photometry import HG
+
+        if 'pv' in kwargs.keys():
+            pv = self._apply_unit(kwargs['pv'],
+                                  u.dimensionless_unscaled)
+        else:
+            pv = self._apply_unit(self.phys['pv'],
+                                  u.dimensionless_unscaled)
+
+        if 'G' in kwargs.keys():
+            slopepar = self._apply_unit(kwargs['G'],
+                                        u.dimensionless_unscaled)
+        elif 'G' in self.phys.column_names:
+            slopepar = self._apply_unit(self.phys['G'],
+                                        u.dimensionless_unscaled)
+        else:
+            slopepar = 0.15
+            if append_results:
+                self.phys['G'] = slopepar
+
+        # # use HG photometric model (any other model could be used)
+        # photmodel = HG(H=absmag, geoalb=pv, G=0.15)
+        # # hard-code G here as it is irrelevant for this calculation
+        # photometry does not yet provide a way to initialize models
+        # with albedo (submitted as #146)
+
+        # use this kludge until #146 is closed
+        bondalbedo = pv*(0.29+0.684*slopepar)
+
+        if append_results:
+            self.phys['bondalbedo'] = bondalbedo
+            return Phys.from_table(self.phys.table)
+        else:
+            return bondalbedo
 
     def calculate_eta_from_alpha(self, *pargs, model='Wolters20XX',
                                  append_results=False):
