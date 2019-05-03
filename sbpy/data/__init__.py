@@ -54,7 +54,8 @@ class Conf():
         # physical properties
         ['d', 'D', 'diam', 'diameter', 'Diameter'],
         ['R', 'radius', 'Radius'],
-        ['pv', 'pV', 'p_v', 'p_V', 'V-band Geometric Albedo'],
+        ['pv', 'pV', 'p_v', 'p_V', 'albedo', 'geoalb',
+         'V-band Geometric Albedo'],
     ]
 
     fieldname_idx = {}

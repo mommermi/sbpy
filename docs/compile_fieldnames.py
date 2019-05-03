@@ -30,7 +30,8 @@ As an example, heliocentric distance can be addressed a ``'r'`` or
 
 The list of alternative field names is always up to date, but not
 complete. The source list is located as
-``sbpy.data.conf.fieldnames``. If you think an important alternative
+``sbpy.data.conf.fieldnames`` in file ``sbpy/data/__init__.py``. If you
+think an important alternative
 is missing, please suggest it by opening an issue. However, keep in mind
 that each alternative field name has to be *unique* and *unambiguous*.
 
