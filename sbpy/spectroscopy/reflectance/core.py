@@ -25,8 +25,9 @@ from . import schemas
 
 class Taxon(Fittable1DModel):
 
-    # astropy.modeling parameter: spectral slope
+    # astropy.modeling parameters: spectral slope and reflectance offset
     slope = Parameter(unit=u.percent/u.um)
+    offset = Parameter(unit=u.dimensionless_unscaled)
     _input_units_allow_dimensionless = True
     input_units_equivalencies = {'x': u.spectral()}
 
@@ -37,14 +38,15 @@ class Taxon(Fittable1DModel):
 
     def _parameter_units_for_data_units(self, inputs_unit, outputs_unit):
         """Define units of model parameters."""
-        return OrderedDict([('slope', u.percent/u.um)])
+        return OrderedDict([('slope', u.percent/u.um),
+                            ('offset', u.dimensionless_unscaled)])
 
     def __init__(self, taxon, schema='BusDeMeo', slope=0):
         self.schema = schema
         self.taxon = taxon
 
         self.raw_spec = None  # raw discrete spectrum
-        self.spec = None  # interpolated spectrum
+        self.interp_spec = None  # interpolated spectrum
         self.sigma = None  # interpolated (nearest-neighbor) uncertainties
 
         self.spline_order = None  # polynomial order used for splines
@@ -118,7 +120,7 @@ class Taxon(Fittable1DModel):
                             spec['Sigma'].value])
 
         # interpolate spectrum using splines
-        self.spec = InterpolatedUnivariateSpline(
+        self.interp_spec = InterpolatedUnivariateSpline(
             spec['Wavelength'].to('um').value,
             spec['Spec'].value,
             w=weights,
@@ -131,24 +133,32 @@ class Taxon(Fittable1DModel):
                 slope = pargs[0].to(u.percent/u.um)
             else:
                 slope = u.Quantity(pargs[0], u.percent/u.um)
+            if (isinstance(pargs[1], u.Quantity)):
+                offset = pargs[1].to(u.dimensionless_unscaled)
+            else:
+                offset = u.Quantity(pargs[1], u.dimensionless_unscaled)
         else:
-            slope = 0*u.percent/u.um
+            offset = 0*u.dimensionless_unscaled
 
-        # apply reddening and update interpolated spectrum
+        # apply reddening and offset, update interpolated spectrum
         spec = self.redden(self.raw_spec, slope)
+        spec['Spec'] = spec['Spec'] - offset
         self._update(spec=spec)
 
-        return self.spec(x)
+        return self.interp_spec(x)
 
     def fit(self, spec, init_slope=0*u.percent/u.um,
+            init_offset=0*u.dimensionless_unscaled,
             fitter=fitting.SLSQPLSQFitter()):
         slope = init_slope
-        Fittable1DModel.__init__(self, slope)
+        offset = init_offset
+        Fittable1DModel.__init__(self, slope, offset)
 
         fit = fitter(self, spec['Wavelength'], spec['Spec'])
 
         # apply best-fit slope
         spec = self.redden(self.raw_spec, fit.slope.value*fit.slope.unit)
+        spec['Spec'] = spec['Spec'] - fit.offset
         self._update(spec=spec)
 
         return fit
