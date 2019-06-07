@@ -11,6 +11,7 @@ __all__ = ['Taxon', 'classify']
 import os
 import numpy as np
 from collections import OrderedDict
+import warnings
 
 from scipy.interpolate import InterpolatedUnivariateSpline
 
@@ -18,9 +19,18 @@ import astropy.units as u
 from astropy.modeling import Fittable1DModel, Parameter, fitting
 from astropy.utils.data import get_pkg_data_filename
 from astropy.table import Table
+from astropy.utils.exceptions import AstropyUserWarning
 
 from ...data import Phys
 from . import schemas
+
+
+class ReflectanceExtrapolationWarning(AstropyUserWarning):
+    pass
+
+
+class ReflectanceError(Exception):
+    pass
 
 
 class Taxon(Fittable1DModel):
@@ -50,7 +60,9 @@ class Taxon(Fittable1DModel):
         self.sigma = None  # interpolated (nearest-neighbor) uncertainties
 
         self.spline_order = None  # polynomial order used for splines
-        self.wavelength_range = self.from_file(schema, taxon)
+
+        # read spectrum from file
+        self.from_file(schema, taxon)
 
     def from_file(self, schema, taxon, reddening_slope=0*u.percent/u.um,
                   spline_order=3):
@@ -97,9 +109,6 @@ class Taxon(Fittable1DModel):
             self.raw_spec, reddening_slope)
         self._update(spec=spec)
 
-        return (np.min(self.raw_spec['Wavelength']),
-                np.max(self.raw_spec['Wavelength']))
-
     @staticmethod
     def redden(spec, slope, normalized_at=0.9*u.um):
 
@@ -144,6 +153,21 @@ class Taxon(Fittable1DModel):
         spec = self.redden(self.raw_spec, slope)
         spec['Spec'] = spec['Spec'] - offset
         self._update(spec=spec)
+
+        if isinstance(x, u.Quantity):
+            if (np.any(x > np.max(self.raw_spec['Wavelength'])) or
+                    np.any(x < np.min(self.raw_spec['Wavelength']))):
+                warnings.warn(('spectrum extrapolated: wavelength requested '
+                               'is outside of range of reference spectrum; '
+                               'results might be unreliable.'),
+                              ReflectanceExtrapolationWarning)
+        else:
+            if (np.any(x > np.max(self.raw_spec['Wavelength'].value)) or
+                    np.any(x < np.min(self.raw_spec['Wavelength'].value))):
+                warnings.warn(('spectrum extrapolated: wavelength requested '
+                               'is outside of range of reference spectrum; '
+                               'results might be unreliable.'),
+                              ReflectanceExtrapolationWarning)
 
         return self.interp_spec(x)
 
